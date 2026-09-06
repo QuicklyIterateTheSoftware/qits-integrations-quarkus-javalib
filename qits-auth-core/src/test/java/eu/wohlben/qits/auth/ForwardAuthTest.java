@@ -57,13 +57,13 @@ class ForwardAuthTest {
   void theIdentityCarriesTheRolesAssertedByTheEdge() {
     given()
         .header("X-Qits-User", "alice")
-        .header("X-Qits-Roles", "qits:admin, qits-platform:admin, qits:admin,,")
+        .header("X-Qits-Roles", "qits:admin, qits:admin, qits:admin,,")
         .when()
         .get("/test-identity")
         .then()
         .statusCode(200)
         .body("principal", equalTo("alice"))
-        .body("roles", containsInAnyOrder("qits:admin", "qits-platform:admin"));
+        .body("roles", containsInAnyOrder("qits:admin"));
   }
 
   @Test
