@@ -19,7 +19,7 @@
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
-        <version>2026.906.171046</version>
+        <version>2026.913.81413</version>
     </parent>
 
     <artifactId>qits-service-mock</artifactId>
