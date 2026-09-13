@@ -114,6 +114,42 @@ class MachineAuthTest {
   }
 
   @Test
+  void gateOnAcceptsATokenAddressedOnlyToThePlatformAudience() {
+    // One audience for every token (rulings 2026-09-13): a token naming the shared platform
+    // audience instead of this service's own id still passes.
+    SecurityIdentity platformToken =
+        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build();
+    MachineAuth auth = gateOn(platformToken);
+
+    assertDoesNotThrow(auth::require);
+    assertDoesNotThrow(() -> auth.requireProject("qits"));
+    assertDoesNotThrow(() -> auth.requireClaim(QitsClaims.PROJECT, "qits"));
+    assertTrue(auth.permits(QitsClaims.PROJECT, "qits"));
+  }
+
+  @Test
+  void gateOnRejectsATokenWithNeitherTheOwnNorThePlatformAudience() {
+    SecurityIdentity elsewhere =
+        TestTokens.machine(CI, "prod-qits-someone-else").claim(QitsClaims.PROJECT, "qits").build();
+    MachineAuth auth = gateOn(elsewhere);
+
+    // A 403, exactly today's refusal for a token minted for another service.
+    assertThrows(ForbiddenException.class, auth::require);
+    assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
+    assertFalse(auth.permits(QitsClaims.PROJECT, "qits"));
+  }
+
+  @Test
+  void aBlankPlatformAudienceRestoresTheOldBehaviour() {
+    SecurityIdentity platformToken =
+        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build();
+    MachineAuth auth = new MachineAuth(true, CI, "", platformToken);
+
+    assertThrows(ForbiddenException.class, auth::require);
+    assertFalse(auth.permits(QitsClaims.PROJECT, "qits"));
+  }
+
+  @Test
   void turningTheGateOnWithNoAudienceFailsAtStartup() {
     // Failing the deploy beats accepting a token minted for a different service.
     MachineAuth auth = new MachineAuth(true, null, TestTokens.anonymous());

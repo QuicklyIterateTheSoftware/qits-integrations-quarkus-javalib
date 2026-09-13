@@ -24,6 +24,11 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * it on without {@code qits.auth.machine.audience} fails at startup rather than accepting tokens
  * meant for another service.
  *
+ * <p>A token also passes when its {@code aud} names {@code qits.auth.machine.platform-audience}
+ * (default {@code qits-platform}) instead of this service's own audience — one audience for every
+ * token on the platform (rulings 2026-09-13). A blank platform audience turns this off, leaving
+ * only the service's own audience.
+ *
  * <p>Typical use, from a JAX-RS filter or straight from a resource method:
  *
  * <pre>{@code
@@ -49,20 +54,37 @@ public class MachineAuth {
   /** This service's own id — the {@code aud} value its tokens must carry. */
   public static final String AUDIENCE_KEY = "qits.auth.machine.audience";
 
+  /**
+   * The one audience shared by every token on the platform (rulings 2026-09-13). A machine token
+   * whose {@code aud} names this value passes the same checks as one naming {@link #AUDIENCE_KEY}
+   * — so a service keeps working through its own cutover to the shared audience. Default {@code
+   * qits-platform}; blank turns this off.
+   */
+  public static final String PLATFORM_AUDIENCE_KEY = "qits.auth.machine.platform-audience";
+
   @ConfigProperty(name = REQUIRED_KEY, defaultValue = "false")
   boolean required;
 
   @ConfigProperty(name = AUDIENCE_KEY)
   Optional<String> audience;
 
+  @ConfigProperty(name = PLATFORM_AUDIENCE_KEY, defaultValue = "qits-platform")
+  String platformAudience;
+
   @Inject SecurityIdentity identity;
 
   MachineAuth() {}
 
-  /** For tests and callers outside CDI. */
+  /** For tests and callers outside CDI. The shipped platform audience applies. */
   MachineAuth(boolean required, String audience, SecurityIdentity identity) {
+    this(required, audience, "qits-platform", identity);
+  }
+
+  /** For tests and callers outside CDI that need to vary the platform audience too. */
+  MachineAuth(boolean required, String audience, String platformAudience, SecurityIdentity identity) {
     this.required = required;
     this.audience = Optional.ofNullable(audience);
+    this.platformAudience = platformAudience == null ? "" : platformAudience;
     this.identity = identity;
   }
 
@@ -125,7 +147,9 @@ public class MachineAuth {
     if (!required) {
       return true;
     }
-    return audience.map(a -> MachineIdentity.hasAudience(identity, a)).orElse(false)
+    return audience
+            .map(a -> MachineIdentity.hasAudience(identity, a, platformAudience))
+            .orElse(false)
         && MachineIdentity.claimMatches(identity, name, expected);
   }
 
@@ -134,7 +158,7 @@ public class MachineAuth {
       throw new UnauthorizedException("Machine token required");
     }
     String expected = audience.orElseThrow();
-    if (!MachineIdentity.hasAudience(identity, expected)) {
+    if (!MachineIdentity.hasAudience(identity, expected, platformAudience)) {
       throw new ForbiddenException("Token audience does not include " + expected);
     }
   }

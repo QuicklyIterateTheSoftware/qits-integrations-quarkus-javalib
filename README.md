@@ -429,6 +429,7 @@ Finally, in the service:
 | `qits.auth.forward.dev-user` | `dev` under `%dev`/`%test`, unset otherwise | Synthetic identity when no header arrives. Ignored by a prod build even if it leaks in via env. |
 | `qits.auth.machine.required` | `false` | The rollout gate. |
 | `qits.auth.machine.audience` | unset | This service's own id, e.g. `qits-ci`. Required once the gate is on. |
+| `qits.auth.machine.platform-audience` | `qits-platform` | The one audience shared by every token on the platform (rulings 2026-09-13). A token naming this value passes every check that naming `qits.auth.machine.audience` would. Blank turns this off. |
 
 Defaults ship in this jar's `META-INF/microprofile-config.properties`
 (ordinal 100), below the service's `application.properties` (250) and env (300).
@@ -516,6 +517,12 @@ public Response postReceive(@Valid PostReceiveEvent event) {
 
 An absent claim is a mismatch: a token never granted a `project` may not act on
 one.
+
+A token also passes when its `aud` names `qits.auth.machine.platform-audience`
+(default `qits-platform`) instead of this service's own
+`qits.auth.machine.audience` — one audience for every token on the platform
+(rulings 2026-09-13). A blank `qits.auth.machine.platform-audience` turns this
+off, leaving only the service's own audience — today's behaviour.
 
 ### The wildcard
 

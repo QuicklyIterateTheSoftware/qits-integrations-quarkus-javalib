@@ -34,6 +34,28 @@ class MachineIdentityTest {
   }
 
   @Test
+  void hasAudienceAlsoAcceptsTheSharedPlatformAudience() {
+    // The two-argument overload reads qits.auth.machine.platform-audience off config; this
+    // module's shipped default is "qits-platform" (one audience for the whole platform).
+    SecurityIdentity platformOnly = TestTokens.machine(CI, "qits-platform").build();
+
+    assertTrue(MachineIdentity.hasAudience(platformOnly, WORKSPACES));
+    assertTrue(MachineIdentity.matchesProject(
+        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build(),
+        WORKSPACES,
+        "qits"));
+  }
+
+  @Test
+  void hasAudienceWithABlankPlatformAudienceOnlyAcceptsTheOwnOne() {
+    SecurityIdentity platformOnly = TestTokens.machine(CI, "qits-platform").build();
+
+    assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, ""));
+    assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, null));
+    assertTrue(MachineIdentity.hasAudience(platformOnly, "qits-platform", ""));
+  }
+
+  @Test
   void aGrantedClaimReadsBackAndAnUngrantedOneIsEmpty() {
     SecurityIdentity identity =
         TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();

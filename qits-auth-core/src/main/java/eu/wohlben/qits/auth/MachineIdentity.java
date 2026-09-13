@@ -4,6 +4,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.json.JsonString;
 import java.util.Optional;
 import java.util.Set;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 
 /**
@@ -36,10 +37,35 @@ public final class MachineIdentity {
 
   /**
    * True when the token is addressed to {@code audience} — a service id, which the caller reads
-   * from config because every service id carries an environment.
+   * from config because every service id carries an environment — OR to the shared {@code
+   * qits.auth.machine.platform-audience} (rulings 2026-09-13: one audience for the whole
+   * platform). Read here through {@link ConfigProvider} rather than a parameter, so a caller that
+   * already has one audience in hand needs no change to keep working. Use the three-argument
+   * overload to pass a known platform audience instead, such as one already read through CDI.
    */
   public static boolean hasAudience(SecurityIdentity identity, String audience) {
-    return audiences(identity).contains(audience);
+    return hasAudience(identity, audience, platformAudienceFromConfig());
+  }
+
+  /**
+   * The same check as {@link #hasAudience(SecurityIdentity, String)}, with the platform audience
+   * given rather than read from config. A blank or {@code null} {@code platformAudience} means "no
+   * platform audience" — only {@code audience} counts, which is the behaviour every caller had
+   * before the platform audience existed.
+   */
+  public static boolean hasAudience(
+      SecurityIdentity identity, String audience, String platformAudience) {
+    Set<String> aud = audiences(identity);
+    if (aud.contains(audience)) {
+      return true;
+    }
+    return platformAudience != null && !platformAudience.isBlank() && aud.contains(platformAudience);
+  }
+
+  private static String platformAudienceFromConfig() {
+    return ConfigProvider.getConfig()
+        .getOptionalValue(MachineAuth.PLATFORM_AUDIENCE_KEY, String.class)
+        .orElse(null);
   }
 
   /**
@@ -73,20 +99,32 @@ public final class MachineIdentity {
         .isPresent();
   }
 
-  /** Shorthand for the common check: right audience and right {@code project}. */
+  /**
+   * Shorthand for the common check: right audience and right {@code project}. "Right audience"
+   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
+   * String)}.
+   */
   public static boolean matchesProject(
       SecurityIdentity identity, String audience, String project) {
     return hasAudience(identity, audience) && claimMatches(identity, QitsClaims.PROJECT, project);
   }
 
-  /** Shorthand for the common check: right audience and right {@code workspace}. */
+  /**
+   * Shorthand for the common check: right audience and right {@code workspace}. "Right audience"
+   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
+   * String)}.
+   */
   public static boolean matchesWorkspace(
       SecurityIdentity identity, String audience, String workspace) {
     return hasAudience(identity, audience)
         && claimMatches(identity, QitsClaims.WORKSPACE, workspace);
   }
 
-  /** Shorthand for the common check: right audience and right {@code branch}. */
+  /**
+   * Shorthand for the common check: right audience and right {@code branch}. "Right audience"
+   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
+   * String)}.
+   */
   public static boolean matchesBranch(SecurityIdentity identity, String audience, String branch) {
     return hasAudience(identity, audience) && claimMatches(identity, QitsClaims.BRANCH, branch);
   }
