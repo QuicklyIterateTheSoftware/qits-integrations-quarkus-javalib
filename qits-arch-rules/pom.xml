@@ -10,12 +10,15 @@
          built the way the platform is built", so they ship together.
 
          EVERY TYPE THE RULES JUDGE IS NAMED AS A STRING, never as a dependency. The rules reason
-         about jakarta.persistence and qits-eventstream types, and depending on either would (a)
-         need the platform Maven registry, breaking the clone-alone build rule, and (b) couple this
-         module's version to qits-eventstream's for no runtime gain — ArchUnit reads bytecode, and
-         bytecode carries names. The price is that a rename over there silently un-matches a rule
-         here; the fixture mirror in this module's test sources is where that would surface, and
-         the rule javadoc names the contract. -->
+         about jakarta.persistence, qits-eventstream and quarkus-junit5 types, and depending on any
+         of them would (a) need the platform Maven registry, breaking the clone-alone build rule,
+         and (b) couple this module's version to somebody else's for no runtime gain — ArchUnit
+         reads bytecode, and bytecode carries names. quarkus-junit5, which TestProfileBudgetRules
+         judges, is the sharpest case: it is compile scope nowhere in the fleet, and putting it here
+         would push the Quarkus test framework onto the classpath of every consumer of these rules
+         and pin the fleet's Quarkus version from an arch-rules release. The price is that a rename
+         over there silently un-matches a rule here; the fixture mirror in this module's test
+         sources is where that would surface, and the rule javadoc names the contract. -->
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>

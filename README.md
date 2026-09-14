@@ -6,7 +6,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, and the datasource baseline. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the test-profile budget, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
@@ -285,6 +285,52 @@ qits-eventstream nor jakarta.persistence. Bytecode carries names, a bare clone b
 platform registry, and the two libraries' versions stay uncoupled. The contract that buys: a rename
 in qits-eventstream must update the rules' constants and the fixture mirror in this module's test
 sources, where the drift surfaces first.
+
+## TestProfileBudgetRules
+
+**At most one `QuarkusTestProfile` per module**, unless the duplicate implements
+`NecessaryTestProfileDuplication`. Profiles live in test sources, so this rule gets its own test
+class — one `@AnalyzeClasses` cannot both include and exclude tests:
+
+```java
+@AnalyzeClasses(packages = "eu.wohlben.qits.<service>",
+    importOptions = ImportOption.OnlyIncludeTests.class)
+class TestProfileBudgetTest {
+  @ArchTest static final ArchTests PROFILES = ArchTests.in(TestProfileBudgetRules.class);
+}
+```
+
+qits-workspaces-service's CI gate died four times on 2026-09-14 with `Process Exit Code: 137` — the
+OOM killer — inside qits-ci's hard `QITS_CI_MEMORY_LIMIT=4g` step container: no failing test, no
+stack trace, and a build that read as an infrastructure flake for as long as anybody kept rerunning
+it. Measured cause: **each distinct `@TestProfile` is a Quarkus restart, and each restart retains its
+application's classloader** — about 125 MB of metaspace never given back for the life of the fork.
+Fourteen applications in one module's suite came to 1.71 GiB committed metaspace inside a 3.41 GiB
+fork. `-XX:MaxMetaspaceSize` reclaims none of it; it only turns the SIGKILL into
+`OutOfMemoryError: Metaspace`. The only lever is *fewer applications*, and profiles mint them.
+
+**It counts profiles rather than comparing their configuration**, and that is the whole shape of the
+rule. "No two profiles with equal config" would have caught none of the fourteen: almost every one
+minted a *fresh temp directory* for a config key, which made its config map unequal to every other
+**by construction** while buying nothing. Profiles that differ are the normal case even when the
+duplication is pure accident, so difference cannot be the test. The count is — it is what the
+metaspace is proportional to.
+
+A failure names the offender *and every other unmarked profile in the module*, so one red build shows
+the whole bill, prices the duplication, and gives the two repairs: merge it, or implement
+`NecessaryTestProfileDuplication` and say in that class's javadoc why the two configurations cannot
+be one. The marker's own javadoc carries the price list, so marking one is a purchase rather than a
+silenced test; "it needs a different config map" is not a reason, since that was true of all fourteen.
+
+Interfaces, abstract classes and anonymous classes are not counted: none can be named in a
+`@TestProfile`, and a shared abstract base several profiles extend is the *repair* this rule asks
+for. A module with no profile at all passes — the best state the rule describes, not a
+misconfiguration.
+
+`QuarkusTestProfile` is matched **by name**, the same trick as above, and it earns its keep twice
+here: a compile dependency on `quarkus-junit5` would put the Quarkus test framework on every
+consumer's classpath and pin the fleet's Quarkus version from an arch-rules release. The fixture
+mirror in this module's test sources is where a Quarkus rename would surface.
 
 ## DatasourceBaselineRules
 
