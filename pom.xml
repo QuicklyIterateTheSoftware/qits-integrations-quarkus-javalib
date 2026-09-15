@@ -25,7 +25,7 @@
          augments from the classpath at test time without it. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-integrations-quarkus</artifactId>
-    <version>2026.914.173515</version>
+    <version>2026.915.220910</version>
     <packaging>pom</packaging>
     <name>qits-integrations-quarkus</name>
 
