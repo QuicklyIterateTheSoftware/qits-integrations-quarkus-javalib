@@ -474,8 +474,7 @@ Finally, in the service:
 | `qits.auth.forward.user-header` | `X-Qits-User` | The header qits-gateway asserts. |
 | `qits.auth.forward.dev-user` | `dev` under `%dev`/`%test`, unset otherwise | Synthetic identity when no header arrives. Ignored by a prod build even if it leaks in via env. |
 | `qits.auth.machine.required` | `false` | The rollout gate. |
-| `qits.auth.machine.audience` | unset | This service's own id, e.g. `qits-ci`. Required once the gate is on. |
-| `qits.auth.machine.platform-audience` | `qits-platform` | The one audience shared by every token on the platform (rulings 2026-09-13). A token naming this value passes every check that naming `qits.auth.machine.audience` would. Blank turns this off. |
+| `qits.auth.machine.platform-audience` | `qits-platform` | The one audience every token on the platform carries (rulings 2026-09-13). An enforced call demands it and accepts nothing else. Blank names no audience a token could carry, so it refuses every enforced call. |
 
 Defaults ship in this jar's `META-INF/microprofile-config.properties`
 (ordinal 100), below the service's `application.properties` (250) and env (300).
@@ -496,11 +495,10 @@ The service adds these itself:
 </dependency>
 ```
 
-Validating inbound bearers (qits-ci shown; substitute the service's own id):
+Validating inbound bearers — the same block in every service, because the
+audience is the same in every service:
 
 ```properties
-qits.auth.machine.audience=qits-ci
-
 quarkus.oidc.auth-server-url=http://qits-idp:8080/idp
 quarkus.oidc.application-type=service
 # Discovery off: the fetch is internal on qits-net while the issuer string is a
@@ -508,7 +506,7 @@ quarkus.oidc.application-type=service
 # auth-server-url, so it is `jwks`, not `/idp/jwks`.
 quarkus.oidc.discovery-enabled=false
 quarkus.oidc.jwks-path=jwks
-quarkus.oidc.token.audience=${qits.auth.machine.audience}
+quarkus.oidc.token.audience=qits-platform
 ```
 
 Set `quarkus.oidc.token.issuer` when the two diverge — they do the day the idp
@@ -529,7 +527,7 @@ quarkus.oidc-client.token-path=token
 quarkus.oidc-client.client-id=qits-ci
 quarkus.oidc-client.credentials.secret=${QITS_CI_CLIENT_SECRET}
 quarkus.oidc-client.grant.type=client
-quarkus.oidc-client.grant-options.client.audience=qits-cd
+quarkus.oidc-client.grant-options.client.audience=qits-platform
 ```
 
 `quarkus-oidc-client` caches and refreshes, so an idp restart pauses new-token
@@ -553,7 +551,7 @@ public Response postReceive(@Valid PostReceiveEvent event) {
 
 | Call | Demands |
 | --- | --- |
-| `require()` | A machine token addressed to this service. |
+| `require()` | A machine token carrying the platform audience. |
 | `requireProject(p)` | …and a `project` claim equal to `p`. |
 | `requireWorkspace(w)` | …and a `workspace` claim equal to `w`. |
 | `requireBranch(b)` | …and a `branch` claim equal to `b`. |
@@ -564,11 +562,15 @@ public Response postReceive(@Valid PostReceiveEvent event) {
 An absent claim is a mismatch: a token never granted a `project` may not act on
 one.
 
-A token also passes when its `aud` names `qits.auth.machine.platform-audience`
-(default `qits-platform`) instead of this service's own
-`qits.auth.machine.audience` — one audience for every token on the platform
-(rulings 2026-09-13). A blank `qits.auth.machine.platform-audience` turns this
-off, leaving only the service's own audience — today's behaviour.
+An enforced call demands the platform audience: `aud` names
+`qits.auth.machine.platform-audience` (`qits-platform`) or the call is refused.
+There is one audience for every token on the platform (rulings 2026-09-13) — the
+audience says the token was minted for this platform, and a role or a claim,
+never an audience, decides what the caller may then do.
+
+A blank `qits.auth.machine.platform-audience` refuses every enforced call. It is
+the only audience there is, so blanking it names nothing a token could carry; it
+is a misconfiguration, not a way to switch the audience check off.
 
 ### The wildcard
 
@@ -597,8 +599,9 @@ unenforced path.
 
 **Service ids are not in `QitsClaims`, and none may go back in.** Every service
 is deployed once per environment as `<env>-qits-<app>`, so an id is deployment
-knowledge: a service reads its own from `qits.auth.machine.audience` and its
-peers' from injected config. `CI`, `CD`, `ARTIFACTS`, `WORKSPACES` and `GATEWAY`
+knowledge: a service reads its own id and its peers' from injected config — it is
+never an `aud` value, which is always `qits-platform`. `CI`, `CD`, `ARTIFACTS`,
+`WORKSPACES` and `GATEWAY`
 were constants here and are gone with the last of the platform-scoped services.
 
 ### The gate
@@ -608,9 +611,9 @@ Off, every `require*` returns at once and the endpoint behaves exactly as it
 does today — network trust, no bearer needed. That is what lets enforcement code
 ship first and switch on later, one service at a time, with an env var.
 
-There is no third state. Turning the gate on without
-`qits.auth.machine.audience` fails at startup rather than accepting a token
-minted for another service.
+There is no third state, and nothing else to configure: turning the gate on needs
+no second key, because the audience it enforces is `qits-platform` in every
+service.
 
 ### Phase-1 call sites
 
@@ -620,8 +623,8 @@ minted for another service.
 | qits-cd | `POST /cd/api/events/build-succeeded` | `require()`. |
 | qits-artifacts | JAX-RS writes under `repositories`, `store`, `gc`, `mirror-upstreams` | `require()` — replaces `ArtifactsTokenFilter` / `X-Artifacts-Token`. `/artifacts/git/*` and `/v2/*` are unchanged. |
 
-Each service sets `qits.auth.machine.audience` to its own id, so `require()`
-already means "a token minted for me".
+Every token carries `qits-platform`, so `require()` means "a token minted for
+this platform"; what the caller may do with it is the claim's business.
 
 ---
 
@@ -731,7 +734,7 @@ by a self-test verifying through jose4j — the library quarkus-oidc itself is b
 MockIdp idp = MockIdp.start();                       // or ensureStarted()/attach() — same pattern
 String url = idp.baseUrl();                          // -> quarkus.oidc.auth-server-url
 String token = idp.token()
-    .subject("qits-ci").audience("dev-qits-githost").groups("qits:system").mint();
+    .subject("qits-ci").audience("qits-platform").groups("qits:system").mint();
 idp.recordedRequests();                              // did the service fetch /idp/jwks?
 idp.service();                                       // the underlying MockService, for more stubs
 ```

@@ -16,20 +16,22 @@ import org.junit.jupiter.api.Test;
  */
 class MachineAuthTest {
 
-  // Service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  /** The one audience every token on the platform carries. */
+  private static final String PLATFORM = "qits-platform";
+
+  // Client ids carry their environment, so they are spelled here rather than in QitsClaims.
   private static final String CI = "prod-qits-ci";
   private static final String ARTIFACTS = "prod-qits-artifacts";
-  private static final String WORKSPACES = "prod-qits-workspaces";
 
   private static final SecurityIdentity CI_TOKEN_FOR_QITS =
-      TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();
+      TestTokens.machine(CI, PLATFORM).claim(QitsClaims.PROJECT, "qits").build();
 
   private static MachineAuth gateOff(SecurityIdentity identity) {
-    return new MachineAuth(false, CI, identity);
+    return new MachineAuth(false, identity);
   }
 
   private static MachineAuth gateOn(SecurityIdentity identity) {
-    return new MachineAuth(true, CI, identity);
+    return new MachineAuth(true, identity);
   }
 
   @Test
@@ -38,7 +40,7 @@ class MachineAuthTest {
         new SecurityIdentity[] {
           TestTokens.anonymous(),
           TestTokens.user("alice"),
-          TestTokens.machine("someone-else", ARTIFACTS).build()
+          TestTokens.machine("someone-else", "somewhere-else").build()
         }) {
       MachineAuth auth = gateOff(identity);
       assertFalse(auth.enforced());
@@ -57,6 +59,7 @@ class MachineAuthTest {
     assertTrue(auth.enforced());
     assertDoesNotThrow(auth::require);
     assertDoesNotThrow(() -> auth.requireProject("qits"));
+    assertDoesNotThrow(() -> auth.requireClaim(QitsClaims.PROJECT, "qits"));
     assertTrue(auth.permits(QitsClaims.PROJECT, "qits"));
   }
 
@@ -73,7 +76,7 @@ class MachineAuthTest {
     // How the git-host holds its grant: one client acting for every project.
     MachineAuth auth =
         gateOn(
-            TestTokens.machine(ARTIFACTS, CI)
+            TestTokens.machine(ARTIFACTS, PLATFORM)
                 .claim(QitsClaims.PROJECT, QitsClaims.ANY)
                 .build());
 
@@ -86,21 +89,8 @@ class MachineAuthTest {
 
   @Test
   void gateOnRejectsAnUngrantedClaim() {
-    MachineAuth auth = gateOn(TestTokens.machine(CI, CI).build());
+    MachineAuth auth = gateOn(TestTokens.machine(CI, PLATFORM).build());
 
-    assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
-  }
-
-  @Test
-  void gateOnRejectsATokenMeantForAnotherService() {
-    MachineAuth auth =
-        gateOn(
-            TestTokens.machine(WORKSPACES, ARTIFACTS)
-                .claim(QitsClaims.PROJECT, "qits")
-                .build());
-
-    // A 403, not a 401: the caller authenticated, it just is not talking to its own service.
-    assertThrows(ForbiddenException.class, auth::require);
     assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
   }
 
@@ -114,47 +104,38 @@ class MachineAuthTest {
   }
 
   @Test
-  void gateOnAcceptsATokenAddressedOnlyToThePlatformAudience() {
-    // One audience for every token (rulings 2026-09-13): a token naming the shared platform
-    // audience instead of this service's own id still passes.
-    SecurityIdentity platformToken =
-        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build();
-    MachineAuth auth = gateOn(platformToken);
-
-    assertDoesNotThrow(auth::require);
-    assertDoesNotThrow(() -> auth.requireProject("qits"));
-    assertDoesNotThrow(() -> auth.requireClaim(QitsClaims.PROJECT, "qits"));
-    assertTrue(auth.permits(QitsClaims.PROJECT, "qits"));
-  }
-
-  @Test
-  void gateOnRejectsATokenWithNeitherTheOwnNorThePlatformAudience() {
+  void gateOnRejectsATokenWithoutThePlatformAudience() {
+    // The only audience qits-idp mints is qits-platform, so anything else is a token this platform
+    // did not issue for this platform. A 403, not a 401: the caller authenticated.
     SecurityIdentity elsewhere =
-        TestTokens.machine(CI, "prod-qits-someone-else").claim(QitsClaims.PROJECT, "qits").build();
+        TestTokens.machine(CI, "somewhere-else").claim(QitsClaims.PROJECT, "qits").build();
     MachineAuth auth = gateOn(elsewhere);
 
-    // A 403, exactly today's refusal for a token minted for another service.
     assertThrows(ForbiddenException.class, auth::require);
     assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
     assertFalse(auth.permits(QitsClaims.PROJECT, "qits"));
   }
 
   @Test
-  void aBlankPlatformAudienceRestoresTheOldBehaviour() {
-    SecurityIdentity platformToken =
-        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build();
-    MachineAuth auth = new MachineAuth(true, CI, "", platformToken);
+  void gateOnRejectsATokenWithNoAudienceAtAll() {
+    MachineAuth auth =
+        gateOn(TestTokens.machine(CI).claim(QitsClaims.PROJECT, "qits").build());
 
     assertThrows(ForbiddenException.class, auth::require);
     assertFalse(auth.permits(QitsClaims.PROJECT, "qits"));
   }
 
   @Test
-  void turningTheGateOnWithNoAudienceFailsAtStartup() {
-    // Failing the deploy beats accepting a token minted for a different service.
-    MachineAuth auth = new MachineAuth(true, null, TestTokens.anonymous());
+  void aBlankPlatformAudienceRefusesEveryEnforcedCall() {
+    // Blanking the only audience there is names nothing a token could carry, so it denies rather
+    // than opening the door — and a token with a blank `aud` does not sneak through either.
+    MachineAuth auth = new MachineAuth(true, "", CI_TOKEN_FOR_QITS);
 
-    assertThrows(IllegalStateException.class, () -> auth.validateConfig(null));
-    assertDoesNotThrow(() -> new MachineAuth(false, null, TestTokens.anonymous()).validateConfig(null));
+    assertThrows(ForbiddenException.class, auth::require);
+    assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
+    assertFalse(auth.permits(QitsClaims.PROJECT, "qits"));
+    assertThrows(
+        ForbiddenException.class,
+        () -> new MachineAuth(true, "", TestTokens.machine(CI, "").build()).require());
   }
 }

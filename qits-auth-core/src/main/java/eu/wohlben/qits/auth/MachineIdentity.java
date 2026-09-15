@@ -36,12 +36,12 @@ public final class MachineIdentity {
   }
 
   /**
-   * True when the token is addressed to {@code audience} — a service id, which the caller reads
-   * from config because every service id carries an environment — OR to the shared {@code
-   * qits.auth.machine.platform-audience} (rulings 2026-09-13: one audience for the whole
-   * platform). Read here through {@link ConfigProvider} rather than a parameter, so a caller that
-   * already has one audience in hand needs no change to keep working. Use the three-argument
-   * overload to pass a known platform audience instead, such as one already read through CDI.
+   * True when the token is addressed to the platform — {@code qits.auth.machine.platform-audience}
+   * (rulings 2026-09-13: one audience for the whole platform) — or to {@code audience}, an extra
+   * value the caller will accept as well. The platform audience is read here through {@link
+   * ConfigProvider} rather than taken as a parameter, so the everyday call site names only what it
+   * has in hand. Use the three-argument overload to pass a known platform audience instead, such as
+   * one already read through CDI.
    */
   public static boolean hasAudience(SecurityIdentity identity, String audience) {
     return hasAudience(identity, audience, platformAudienceFromConfig());
@@ -49,9 +49,9 @@ public final class MachineIdentity {
 
   /**
    * The same check as {@link #hasAudience(SecurityIdentity, String)}, with the platform audience
-   * given rather than read from config. A blank or {@code null} {@code platformAudience} means "no
-   * platform audience" — only {@code audience} counts, which is the behaviour every caller had
-   * before the platform audience existed.
+   * given rather than read from config. A blank or {@code null} {@code platformAudience} leaves
+   * only {@code audience} to match, which is how a caller asks about one named audience and nothing
+   * else.
    */
   public static boolean hasAudience(
       SecurityIdentity identity, String audience, String platformAudience) {

@@ -6,21 +6,21 @@ import java.util.Set;
  * The vocabulary of a qits machine token: the structured claim names, and the value that covers
  * every one of them.
  *
- * <p><b>Claims, not scopes.</b> qits-idp issues no scope strings. A token says who it is for
- * ({@code aud}) and what it is about ({@code project} / {@code workspace} / {@code branch}); the
- * resource service decides what that permits. Spell the names from here rather than inline — a
- * typo in a claim name reads as "no claim", which is a silent pass on an unenforced path and a
- * silent denial on an enforced one.
+ * <p><b>Claims, not scopes.</b> qits-idp issues no scope strings. A token says that it was minted
+ * for this platform ({@code aud}, always {@code qits-platform}) and what it is about ({@code
+ * project} / {@code workspace} / {@code branch}); the resource service decides what that permits.
+ * Spell the names from here rather than inline — a typo in a claim name reads as "no claim", which
+ * is a silent pass on an unenforced path and a silent denial on an enforced one.
  *
  * <p>Claims appear on a token only when granted to the client, so absence is normal and never an
  * error by itself.
  *
  * <p><b>No service id is a constant here, and none may become one.</b> A service id is the client id
- * when a service asks for a token and the {@code aud} value when it receives one, and every qits
- * service is an environment service: it is named {@code <env>-qits-<app>} — {@code prod-qits-ci} —
- * and the environment is not known until deploy time. So a service reads its own id from {@code
- * qits.auth.machine.audience} and its peers' from injected config, which is what every one of them
- * already does. Anything named here would be true in one environment and wrong in every other.
+ * when a service asks for a token — the {@code aud} it receives is the platform's one audience, not
+ * an id — and every qits service is an environment service: it is named {@code <env>-qits-<app>} —
+ * {@code prod-qits-ci} — and the environment is not known until deploy time. So a service reads its
+ * own id and its peers' from injected config, which is what every one of them already does.
+ * Anything named here would be true in one environment and wrong in every other.
  *
  * <p>There used to be constants: {@code CI}, {@code CD}, {@code WORKSPACES}, {@code GATEWAY}, and
  * last {@code ARTIFACTS} with a {@code SERVICE_IDS} set holding it alone. They were removed as each

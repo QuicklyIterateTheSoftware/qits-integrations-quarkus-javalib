@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Test;
 /** Reading a machine token off an identity: what is there, what is not, and what that means. */
 class MachineIdentityTest {
 
+  /** The one audience every token on the platform carries. */
+  private static final String PLATFORM = "qits-platform";
+
   // Service ids carry their environment, so they are spelled here rather than in QitsClaims.
   private static final String CI = "prod-qits-ci";
   private static final String ARTIFACTS = "prod-qits-artifacts";
@@ -25,7 +28,7 @@ class MachineIdentityTest {
   }
 
   @Test
-  void theAudienceIsTheServiceTheTokenIsFor() {
+  void anExtraAudienceIsMatchedExactly() {
     SecurityIdentity identity = TestTokens.machine(CI, WORKSPACES).build();
 
     assertTrue(MachineIdentity.hasAudience(identity, WORKSPACES));
@@ -34,25 +37,25 @@ class MachineIdentityTest {
   }
 
   @Test
-  void hasAudienceAlsoAcceptsTheSharedPlatformAudience() {
+  void hasAudienceAcceptsThePlatformAudience() {
     // The two-argument overload reads qits.auth.machine.platform-audience off config; this
-    // module's shipped default is "qits-platform" (one audience for the whole platform).
-    SecurityIdentity platformOnly = TestTokens.machine(CI, "qits-platform").build();
+    // module's shipped default is "qits-platform", the one audience every token carries.
+    SecurityIdentity platformOnly = TestTokens.machine(CI, PLATFORM).build();
 
     assertTrue(MachineIdentity.hasAudience(platformOnly, WORKSPACES));
     assertTrue(MachineIdentity.matchesProject(
-        TestTokens.machine(CI, "qits-platform").claim(QitsClaims.PROJECT, "qits").build(),
+        TestTokens.machine(CI, PLATFORM).claim(QitsClaims.PROJECT, "qits").build(),
         WORKSPACES,
         "qits"));
   }
 
   @Test
-  void hasAudienceWithABlankPlatformAudienceOnlyAcceptsTheOwnOne() {
-    SecurityIdentity platformOnly = TestTokens.machine(CI, "qits-platform").build();
+  void hasAudienceWithABlankPlatformAudienceLeavesOnlyTheNamedOne() {
+    SecurityIdentity platformOnly = TestTokens.machine(CI, PLATFORM).build();
 
     assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, ""));
     assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, null));
-    assertTrue(MachineIdentity.hasAudience(platformOnly, "qits-platform", ""));
+    assertTrue(MachineIdentity.hasAudience(platformOnly, PLATFORM, ""));
   }
 
   @Test

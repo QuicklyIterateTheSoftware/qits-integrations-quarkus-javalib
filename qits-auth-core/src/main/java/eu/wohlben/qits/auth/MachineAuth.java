@@ -1,13 +1,10 @@
 package eu.wohlben.qits.auth;
 
-import io.quarkus.runtime.StartupEvent;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
-import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
@@ -16,18 +13,22 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * <p><b>The gate is {@code qits.auth.machine.required}, default {@code false}.</b> Off, every {@code
  * require*} method returns at once and the endpoint behaves exactly as it does today — network
  * trust, no bearer needed. That is what lets a service ship its enforcement code before qits-idp is
- * deployed. On, the same call demands a validated token addressed to this service and carrying the
+ * deployed. On, the same call demands a validated token carrying the platform audience and the
  * matching claim.
  *
  * <p>There is no third state. The gate is read once per call and nothing else varies with it, so a
- * deployment is either "as before" or "enforced" — never partly one and partly the other. Turning
- * it on without {@code qits.auth.machine.audience} fails at startup rather than accepting tokens
- * meant for another service.
+ * deployment is either "as before" or "enforced" — never partly one and partly the other.
  *
- * <p>A token also passes when its {@code aud} names {@code qits.auth.machine.platform-audience}
- * (default {@code qits-platform}) instead of this service's own audience — one audience for every
- * token on the platform (rulings 2026-09-13). A blank platform audience turns this off, leaving
- * only the service's own audience.
+ * <p><b>One audience for every token on the platform</b> (rulings 2026-09-13): {@code
+ * qits.auth.machine.platform-audience}, {@code qits-platform}. A token's {@code aud} names it or
+ * the call is refused — the audience says the token was minted for this platform, and a role or a
+ * claim, never an audience, decides what the caller may then do. A service therefore has no id of
+ * its own to configure here, and no enforcing service can be locked out by a token addressed to a
+ * sibling: there are no sibling audiences.
+ *
+ * <p>A blank {@code qits.auth.machine.platform-audience} refuses every enforced call. It is the
+ * only audience there is, so blanking it names nothing a token could carry; the deny is what the
+ * check already says, spelled out so it cannot be read as an off switch.
  *
  * <p>Typical use, from a JAX-RS filter or straight from a resource method:
  *
@@ -51,22 +52,15 @@ public class MachineAuth {
   /** The rollout gate. One key, the same in every service. */
   public static final String REQUIRED_KEY = "qits.auth.machine.required";
 
-  /** This service's own id — the {@code aud} value its tokens must carry. */
-  public static final String AUDIENCE_KEY = "qits.auth.machine.audience";
-
   /**
-   * The one audience shared by every token on the platform (rulings 2026-09-13). A machine token
-   * whose {@code aud} names this value passes the same checks as one naming {@link #AUDIENCE_KEY}
-   * — so a service keeps working through its own cutover to the shared audience. Default {@code
-   * qits-platform}; blank turns this off.
+   * The one audience every token on the platform carries (rulings 2026-09-13). An enforced call
+   * demands it and accepts nothing else, because it is the only audience qits-idp mints. Default
+   * {@code qits-platform}; blank names no audience at all and so refuses every enforced call.
    */
   public static final String PLATFORM_AUDIENCE_KEY = "qits.auth.machine.platform-audience";
 
   @ConfigProperty(name = REQUIRED_KEY, defaultValue = "false")
   boolean required;
-
-  @ConfigProperty(name = AUDIENCE_KEY)
-  Optional<String> audience;
 
   @ConfigProperty(name = PLATFORM_AUDIENCE_KEY, defaultValue = "qits-platform")
   String platformAudience;
@@ -76,25 +70,15 @@ public class MachineAuth {
   MachineAuth() {}
 
   /** For tests and callers outside CDI. The shipped platform audience applies. */
-  MachineAuth(boolean required, String audience, SecurityIdentity identity) {
-    this(required, audience, "qits-platform", identity);
+  MachineAuth(boolean required, SecurityIdentity identity) {
+    this(required, "qits-platform", identity);
   }
 
   /** For tests and callers outside CDI that need to vary the platform audience too. */
-  MachineAuth(boolean required, String audience, String platformAudience, SecurityIdentity identity) {
+  MachineAuth(boolean required, String platformAudience, SecurityIdentity identity) {
     this.required = required;
-    this.audience = Optional.ofNullable(audience);
     this.platformAudience = platformAudience == null ? "" : platformAudience;
     this.identity = identity;
-  }
-
-  // A service that enforces must know which tokens are its own. Caught here rather than at the
-  // first request, so the mistake is a failed deploy and not a quietly widened door.
-  void validateConfig(@Observes StartupEvent event) {
-    if (required && audience.isEmpty()) {
-      throw new IllegalStateException(
-          REQUIRED_KEY + "=true needs " + AUDIENCE_KEY + " set to this service's id");
-    }
   }
 
   /** True when the gate is on. Read it to log the posture, not to skip a {@code require*} call. */
@@ -102,7 +86,7 @@ public class MachineAuth {
     return required;
   }
 
-  /** Demands a machine token addressed to this service. No claim is inspected. */
+  /** Demands a machine token carrying the platform audience. No claim is inspected. */
   public void require() {
     if (!required) {
       return;
@@ -147,19 +131,22 @@ public class MachineAuth {
     if (!required) {
       return true;
     }
-    return audience
-            .map(a -> MachineIdentity.hasAudience(identity, a, platformAudience))
-            .orElse(false)
-        && MachineIdentity.claimMatches(identity, name, expected);
+    return hasPlatformAudience() && MachineIdentity.claimMatches(identity, name, expected);
   }
 
   private void requireMachineToken() {
     if (!MachineIdentity.isMachine(identity)) {
       throw new UnauthorizedException("Machine token required");
     }
-    String expected = audience.orElseThrow();
-    if (!MachineIdentity.hasAudience(identity, expected, platformAudience)) {
-      throw new ForbiddenException("Token audience does not include " + expected);
+    if (!hasPlatformAudience()) {
+      throw new ForbiddenException("Token audience does not include " + platformAudience);
     }
+  }
+
+  // Spelled out rather than left to a set lookup: a blank platform audience is not a value a token
+  // can carry, so it refuses here instead of matching a token that happens to hold a blank `aud`.
+  private boolean hasPlatformAudience() {
+    return !platformAudience.isBlank()
+        && MachineIdentity.audiences(identity).contains(platformAudience);
   }
 }
