@@ -1,0 +1,18 @@
+archetype: maven-library
+artifacts:
+  - { type: maven, name: "eu.wohlben.qits:qits-auth-core", sbom: qits-auth-core/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-arch-rules", sbom: qits-arch-rules/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-db-core", sbom: qits-db-core/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-environment-core", sbom: qits-environment-core/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-service-mock", sbom: qits-service-mock/target/sbom.json }
+
+# THIS REPOSITORY HAS NO .qits-maven-settings.xml. The archetype's QA step passes
+# `-s .qits-maven-settings.xml` unconditionally, and Maven refuses to start on a settings file that
+# does not exist — so the gating step would fail before it resolved anything. The release slot is
+# NOT overridden: it already guards on the file's presence. Delete this slot the day the settings
+# file lands, and the archetype's `user: build` and repository property come with it.
+release-request:
+  - image: qits/build-images/maven-base:latest
+    timeout-seconds: 1800
+    script: |
+      ./mvnw -B -ntp verify
