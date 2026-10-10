@@ -1,0 +1,102 @@
+{
+  "formatVersion": 1,
+  "provider": "qits-fixture",
+  "states": [
+    {
+      "name": "a thing",
+      "slug": "a-thing",
+      "params": {
+        "authorization": "Bearer fixture-token",
+        "thingId": "00000000-0000-4000-8000-000000000001"
+      },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getThing",
+          "method": "GET",
+          "path": "/fixture/api/things/{thingId}",
+          "status": 200,
+          "file": "a-thing/getThing.json",
+          "frozen": { "ids": ["$.id"], "instants": ["$.createdAt"], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "listThings",
+          "method": "GET",
+          "path": "/fixture/api/things",
+          "query": { "limit": "20" },
+          "status": 200,
+          "file": "a-thing/listThings.json",
+          "frozen": { "ids": ["$[*].id"], "instants": [], "strings": [], "listFilteredTo": "$" }
+        },
+        {
+          "operationId": "searchThings",
+          "method": "GET",
+          "path": "/fixture/api/things/search?tag=a&tag=b&owner={thingId}",
+          "status": 200,
+          "file": "a-thing/searchThings.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "createThing",
+          "method": "POST",
+          "path": "/fixture/api/things",
+          "body": { "name": "second", "parent": "{thingId}", "tags": ["x"] },
+          "status": 201,
+          "file": "a-thing/createThing.json",
+          "frozen": { "ids": ["$.id"], "instants": [], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "deleteThing",
+          "method": "DELETE",
+          "path": "/fixture/api/things/{thingId}",
+          "status": 204,
+          "file": "a-thing/deleteThing.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "getThingFile",
+          "method": "GET",
+          "path": "/fixture/api/things/{thingId}/file",
+          "status": 200,
+          "file": "a-thing/getThingFile.json",
+          "responseHeaders": { "Git-Commit-Sha": "e447df8a0cabaeafedbf4c0235e013bb29697cd9" },
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        }
+      ]
+    },
+    {
+      "name": "a token request",
+      "slug": "a-token-request",
+      "params": { "clientId": "fixture-client" },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "token",
+          "method": "POST",
+          "path": "/fixture/token",
+          "contentType": "application/x-www-form-urlencoded",
+          "body": "grant_type=client_credentials&client_id={clientId}",
+          "status": 200,
+          "file": "a-token-request/token.json",
+          "frozen": { "ids": [], "instants": [], "strings": ["$.access_token"], "listFilteredTo": null }
+        }
+      ]
+    },
+    {
+      "name": "a registry",
+      "slug": "a-registry",
+      "params": {},
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "getRegistry",
+          "method": "GET",
+          "path": "/fixture/api/registry",
+          "status": 200,
+          "file": "a-registry/getRegistry.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "keys": ["$.byId"], "listFilteredTo": null }
+        }
+      ]
+    }
+  ]
+}

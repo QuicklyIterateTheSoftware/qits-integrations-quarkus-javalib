@@ -35,6 +35,7 @@
         <module>qits-db-core</module>
         <module>qits-environment-core</module>
         <module>qits-service-mock</module>
+        <module>qits-pact-consumer</module>
     </modules>
 
     <properties>
@@ -51,6 +52,10 @@
              classification against the engine it ships on; the two versions move independently. -->
         <zonky.embedded-postgres.version>2.2.2</zonky.embedded-postgres.version>
         <zonky.postgres-binaries.version>18.4.0</zonky.postgres-binaries.version>
+
+        <!-- pact-jvm, for qits-pact-consumer: the version every provider on the estate verifies
+             with, so a consumer's pact is written the way the provider reads it. -->
+        <pact.version>4.6.21</pact.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
@@ -77,6 +82,17 @@
                 <version>${zonky.postgres-binaries.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>au.com.dius.pact.consumer</groupId>
+                <artifactId>junit5</artifactId>
+                <version>${pact.version}</version>
+            </dependency>
+            <dependency>
+                <!-- qits-auth-core's JWKS pact reads with the reactor's own reader. -->
+                <groupId>eu.wohlben.qits</groupId>
+                <artifactId>qits-pact-consumer</artifactId>
+                <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

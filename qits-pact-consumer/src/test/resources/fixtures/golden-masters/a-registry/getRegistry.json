@@ -1,0 +1,13 @@
+{
+  "archetypes": [
+    {
+      "name": "ticket",
+      "phases": {
+        "OPEN": { "flow": [{ "step": "refine", "enters": null }] },
+        "READY": { "flow": [{ "step": "implement", "enters": "IN_PROGRESS" }] },
+        "DONE": { "flow": [] }
+      }
+    }
+  ],
+  "byId": { "00000000-0000-4000-8000-000000000001": { "status": "OPEN" } }
+}

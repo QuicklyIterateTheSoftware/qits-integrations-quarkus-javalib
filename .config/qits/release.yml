@@ -5,6 +5,7 @@ artifacts:
   - { type: maven, name: "eu.wohlben.qits:qits-db-core", path: qits-db-core, sbom: qits-db-core/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-environment-core", path: qits-environment-core, sbom: qits-environment-core/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-service-mock", path: qits-service-mock, sbom: qits-service-mock/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-pact-consumer", path: qits-pact-consumer, sbom: qits-pact-consumer/target/sbom.json }
 
 # THIS REPOSITORY HAS NO .qits-maven-settings.xml. The archetype's QA step passes
 # `-s .qits-maven-settings.xml` unconditionally, and Maven refuses to start on a settings file that
