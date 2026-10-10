@@ -1,7 +1,7 @@
 # qits-integrations-quarkus-javalib
 
 Quarkus glue every qits service needs and no service owns. The reactor is
-`eu.wohlben.qits:qits-integrations-quarkus`, with five modules today:
+`eu.wohlben.qits:qits-integrations-quarkus`, with six modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
+| `qits-pact-consumer/` | `eu.wohlben.qits:qits-pact-consumer` | The consumer half of the contracts: reads providers' golden masters off the test classpath and turns a (provider state, operation) into a pact row that binds only what the consumer reads. Test scope for consumers. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
@@ -743,3 +744,44 @@ Negative-test levers on the builder: `signedByUnknownKey()` (a stranger's signat
 `kid("no-such-kid")`, `ttl(Duration.ofMinutes(-5))` (already expired), a wrong `audience(...)`.
 `ensureStarted()` additionally parks the encoded keypair in system properties, so an attached
 handle signs with the same key the served JWKS published.
+
+---
+
+# qits-pact-consumer
+
+The one golden-master reader for Java consumers (ticket qits-1149). Add it in test scope, next
+to each provider's `eu.wohlben.qits:<app>-golden-masters` jar:
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-pact-consumer</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+A row names the recorded answer and what the consumer reads of it. Method, path, query and
+request body come from the recording:
+
+```java
+static final GoldenMasters IDP = GoldenMasters.of("qits-idp-service", "qits-idp");
+static final GoldenInteraction JWKS =
+    GoldenInteraction.of(Trigger.operation("listThings"), "a published signing key", "getJwks")
+        .consumes("keys[].kid", "keys[].n");     // body paths; none = status only
+        // .header("Authorization", "{authorization}")  a request header from a state param
+        // .readsHeader("Git-Commit-Sha")              a response header the consumer reads
+static final ConsumerPact PACT = ConsumerPact.of("my-repository", IDP, JWKS);
+
+@Test @Disabled("needs provider state 'a published signing key' for getJwks in qits-idp-service")
+void readsTheKeys() { PACT.run(JWKS, (url, recorded) -> /* the real client against url */); }
+
+@Test void theCommittedPactIsWhatTheRowsWrite() { PACT.compareOrWritePactFile(); }
+```
+
+- Several providers on one classpath: each index is picked by its `provider` field.
+- A row whose state the provider has not recorded is left out of the pact file, and `run` fails
+  with `needs provider state '<state>' for <operationId> in <provider>`, the sentence its
+  `@Disabled` carries. Delete `@Disabled` once the provider records it.
+- `compareOrWritePactFile` compares `pacts/<consumer>_<provider>.json` in the repository root;
+  `-Dgolden.update=true` rewrites it. While no row is recorded and no file exists, it is skipped.
+- `qits-auth-core`'s `IdpPactTest` is the worked example.
