@@ -67,20 +67,6 @@
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <!-- The JWKS pact against qits-idp-service (ticket qits-1149): every service's
-                 quarkus-oidc reads the idp's keys, and this jar is where that setup lives. -->
-            <groupId>eu.wohlben.qits</groupId>
-            <artifactId>qits-pact-consumer</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <!-- The JWKS parser quarkus-oidc is built on: the pact's consumer test reads the keys
-                 the way quarkus-oidc does. -->
-            <groupId>org.bitbucket.b_c</groupId>
-            <artifactId>jose4j</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>

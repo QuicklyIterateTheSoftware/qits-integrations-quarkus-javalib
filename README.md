@@ -784,4 +784,3 @@ void readsTheKeys() { PACT.run(JWKS, (url, recorded) -> /* the real client again
   `@Disabled` carries. Delete `@Disabled` once the provider records it.
 - `compareOrWritePactFile` compares `pacts/<consumer>_<provider>.json` in the repository root;
   `-Dgolden.update=true` rewrites it. While no row is recorded and no file exists, it is skipped.
-- `qits-auth-core`'s `IdpPactTest` is the worked example.

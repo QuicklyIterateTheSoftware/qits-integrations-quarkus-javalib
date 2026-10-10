@@ -89,7 +89,6 @@
                 <version>${pact.version}</version>
             </dependency>
             <dependency>
-                <!-- qits-auth-core's JWKS pact reads with the reactor's own reader. -->
                 <groupId>eu.wohlben.qits</groupId>
                 <artifactId>qits-pact-consumer</artifactId>
                 <version>${project.version}</version>
