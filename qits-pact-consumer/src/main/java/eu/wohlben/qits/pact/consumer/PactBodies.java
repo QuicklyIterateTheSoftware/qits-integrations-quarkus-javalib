@@ -35,7 +35,9 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>Every other non-empty array is {@code minMaxArrayLike(n, n)}, its template the merge of every
- * recorded element. Elements that disagree on which keys they carry are matched element by element
+ * recorded element. An array beneath an array, whose length differs between the outer elements, is
+ * {@code minMaxArrayLike(shortest, longest)}: empty in one element, it is {@code min 0}. A leaf
+ * null in some elements is {@code type OR null} at any depth, as the merge recurses. Elements that disagree on which keys they carry are matched element by element
  * instead, each in its place: pact requires every key of a template on every element, and absent
  * is not null. An array named in {@link GoldenInteraction#anyLength} is matched with no length.
  *
@@ -377,7 +379,7 @@ final class PactBodies {
       throw unsupported(op, path, "an array that is null in some elements");
     }
     int n = array.length;
-    if (n == 0) {
+    if (array.maxLength == 0) {
       // Nothing to build a template from: an empty array with no rule is compared as exactly that.
       target.array(name).closeArray();
       return;
@@ -389,7 +391,10 @@ final class PactBodies {
       return;
     }
     boolean filtered = path.equals(op.listFilteredTo());
-    arrayTemplate(target, name, array.element, elementPath, n, n, filtered ? null : n, ctx);
+    // Merged from elements of different lengths (an array beneath an array): from the shortest to the
+    // longest recorded, so an element whose array is empty or shorter still matches.
+    arrayTemplate(target, name, array.element, elementPath, n, Math.max(n, 1),
+        filtered ? null : array.maxLength, ctx);
   }
 
   private static void arrayTemplate(PactDslJsonBody target, String name, Shape element, String elementPath,
@@ -615,7 +620,9 @@ final class PactBodies {
     JsonNode example;
     final LinkedHashMap<String, Shape> fields = new LinkedHashMap<>();
     Shape element;
+    /** An array's length: the shortest and the longest where elements of an outer array were merged. */
     int length;
+    int maxLength;
     /** An array's elements, each its own shape, unmerged: the positional fallback's input. */
     final List<Shape> items = new ArrayList<>();
     /** Whether an array's elements merge into one template at all (no OBJECT beside a LEAF). */
@@ -632,6 +639,7 @@ final class PactBodies {
       } else if (node.isArray()) {
         shape.kind = Kind.ARRAY;
         shape.length = node.size();
+        shape.maxLength = node.size();
         for (JsonNode e : node) {
           shape.items.add(of(e));
           if (shape.mergeable) {
@@ -688,6 +696,7 @@ final class PactBodies {
         }
         case ARRAY -> {
           a.length = Math.min(a.length, b.length);
+          a.maxLength = Math.max(a.maxLength, b.maxLength);
           a.mergeable &= b.mergeable;
           a.element = !a.mergeable ? null
               : a.element == null ? b.element : b.element == null ? a.element : merge(a.element, b.element);

@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "agent": { "name": "first", "removedAt": null },
+      "branches": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "agent": { "name": "second", "removedAt": "2026-01-02T00:00:00Z" },
+      "branches": ["x"]
+    }
+  ]
+}

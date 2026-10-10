@@ -6,15 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import au.com.dius.pact.core.matchers.Mismatch;
+import au.com.dius.pact.core.matchers.ResponseMatching;
+import au.com.dius.pact.core.model.ContentType;
+import au.com.dius.pact.core.model.HttpResponse;
+import au.com.dius.pact.core.model.OptionalBody;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.opentest4j.TestAbortedException;
@@ -170,35 +175,69 @@ class ConsumerPactTest {
     assertEquals("values", rules.path("$.byId").path("matchers").get(0).path("match").asText(), rules.toString());
   }
 
+  /**
+   * Variance below the top level: a field null in some elements of a nested object, an array empty in
+   * some elements. The pact accepts every recorded shape in every element, and still refuses a wrong type.
+   */
+  @Test
+  void nestedNullsAndNestedEmptyArraysAreAccepted() {
+    var row = GoldenInteraction.of(Trigger.operation("showEntries"), "an entry log", "listEntries")
+        .consumes("entries[].id", "entries[].agent.removedAt", "entries[].branches");
+    var expected = ConsumerPact.of(CONSUMER, FIXTURE, row).pact(List.of(row))
+        .getInteractions().get(0).asSynchronousRequestResponse().getResponse();
+    String removed = """
+        {"id": "00000000-0000-4000-8000-0000000000%s", "agent": {"removedAt": "2026-02-03T04:05:06Z"}, "branches": %s}""";
+    String present = """
+        {"id": "00000000-0000-4000-8000-0000000000%s", "agent": {"removedAt": null}, "branches": %s}""";
+    for (String entries : List.of(
+        present.formatted("21", "[]") + "," + present.formatted("22", "[]"),
+        removed.formatted("21", "[\"y\"]") + "," + removed.formatted("22", "[\"z\"]"),
+        removed.formatted("21", "[]") + "," + present.formatted("22", "[\"y\"]"))) {
+      var mismatches = ResponseMatching.responseMismatches(expected, answer("{\"entries\": [" + entries + "]}"));
+      assertTrue(mismatches.isEmpty(), entries + " -> " + mismatches.stream().map(Mismatch::description).toList());
+    }
+    String wrong = removed.formatted("21", "[]").replace("2026-02-03T04:05:06Z", "yesterday")
+        + "," + present.formatted("22", "[1]");
+    String refused = ResponseMatching.responseMismatches(expected, answer("{\"entries\": [" + wrong + "]}"))
+        .stream().map(Mismatch::description).toList().toString();
+    assertTrue(refused.contains("Expected 'yesterday' to match"), refused);
+    assertTrue(refused.contains("Expected 1 (Integer) to be the same type as 'x'"), refused);
+  }
+
+  private static HttpResponse answer(String json) {
+    return new HttpResponse(200, Map.of("Content-Type", List.of("application/json")),
+        OptionalBody.body(json, ContentType.getJSON()));
+  }
+
   /** The row runs against a mock server: the right request passes, a wrong one fails. */
   @Test
   void aRowRunsAgainstAMockServer() {
     ConsumerPact pact = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING);
     pact.run(GET_THING, (url, recorded) -> {
-      HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath()))
-          .header("Authorization", recorded.params().get("authorization")).build(), HttpResponse.BodyHandlers.ofString());
+      java.net.http.HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath()))
+          .header("Authorization", recorded.params().get("authorization")).build(), java.net.http.HttpResponse.BodyHandlers.ofString());
       assertEquals(200, answer.statusCode());
       assertEquals("fixture", MAPPER.readTree(answer.body()).path("owner").path("name").asText());
     });
     assertThrows(AssertionError.class, () -> pact.run(GET_THING, (url, recorded) ->
         HTTP.send(HttpRequest.newBuilder(URI.create(url + "/fixture/api/elsewhere")).build(),
-            HttpResponse.BodyHandlers.ofString())));
+            java.net.http.HttpResponse.BodyHandlers.ofString())));
   }
 
   @Test
   void aFormRowAndAQueryRowRunAgainstAMockServer() {
     var token = GoldenInteraction.of(Trigger.command("qits login"), "a token request", "token").consumes("access_token");
     ConsumerPact.of(CONSUMER, FIXTURE, token).run(token, (url, recorded) -> {
-      HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.path()))
+      java.net.http.HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.path()))
           .header("Content-Type", "application/x-www-form-urlencoded")
           .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials&client_id=fixture-client")).build(),
-          HttpResponse.BodyHandlers.ofString());
+          java.net.http.HttpResponse.BodyHandlers.ofString());
       assertEquals("fixture-access-token", MAPPER.readTree(answer.body()).path("access_token").asText());
     });
     var search = GoldenInteraction.of(Trigger.operation("find"), "a thing", "searchThings").consumes("items[].name");
     ConsumerPact.of(CONSUMER, FIXTURE, search).run(search, (url, recorded) -> {
-      HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.path()
-          + "?tag=a&tag=b&owner=" + recorded.params().get("thingId"))).build(), HttpResponse.BodyHandlers.ofString());
+      java.net.http.HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.path()
+          + "?tag=a&tag=b&owner=" + recorded.params().get("thingId"))).build(), java.net.http.HttpResponse.BodyHandlers.ofString());
       assertEquals("first", MAPPER.readTree(answer.body()).path("items").get(0).path("name").asText());
     });
   }

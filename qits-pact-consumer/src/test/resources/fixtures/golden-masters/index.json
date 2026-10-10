@@ -97,6 +97,27 @@
           "frozen": { "ids": [], "instants": [], "strings": [], "keys": ["$.byId"], "listFilteredTo": null }
         }
       ]
+    },
+    {
+      "name": "an entry log",
+      "slug": "an-entry-log",
+      "params": {},
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listEntries",
+          "method": "GET",
+          "path": "/fixture/api/entries",
+          "status": 200,
+          "file": "an-entry-log/listEntries.json",
+          "frozen": {
+            "ids": ["$.entries[*].id"],
+            "instants": ["$.entries[*].agent.removedAt"],
+            "strings": [],
+            "listFilteredTo": null
+          }
+        }
+      ]
     }
   ]
 }
