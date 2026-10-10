@@ -770,7 +770,11 @@ static final GoldenInteraction JWKS =
         .consumes("keys[].kid", "keys[].n");     // body paths; none = status only
         // .header("Authorization", "{authorization}")  a request header from a state param
         // .readsHeader("Git-Commit-Sha")              a response header the consumer reads
-static final ConsumerPact PACT = ConsumerPact.of("my-repository", IDP, JWKS);
+static final GoldenInteraction DISCOVERY =
+    GoldenInteraction.of(Trigger.operation("signIn"), "a realm", "getDiscovery")
+        .consumes("issuer", "jwks_uri")
+        .exact("issuer");                         // the recorded value, compared as equal
+static final ConsumerPact PACT = ConsumerPact.of("my-repository", IDP, JWKS, DISCOVERY);
 
 @Test @Disabled("needs provider state 'a published signing key' for getJwks in qits-idp-service")
 void readsTheKeys() { PACT.run(JWKS, (url, recorded) -> /* the real client against url */); }
@@ -778,6 +782,9 @@ void readsTheKeys() { PACT.run(JWKS, (url, recorded) -> /* the real client again
 @Test void theCommittedPactIsWhatTheRowsWrite() { PACT.compareOrWritePactFile(); }
 ```
 
+- Every value the row reads is matched by type. `.exact(path)` binds the recorded value
+  instead (`issuer`, `"error": "invalid_client"`). The path uses the `consumes` spelling, must
+  lie at or beneath a consumed path, and must not cross an array or a keyed object.
 - Several providers on one classpath: each index is picked by its `provider` field.
 - A row whose state the provider has not recorded is left out of the pact file, and `run` fails
   with `needs provider state '<state>' for <operationId> in <provider>`, the sentence its

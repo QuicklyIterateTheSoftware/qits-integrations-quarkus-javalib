@@ -11,9 +11,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import eu.wohlben.qits.pact.consumer.GoldenMasters.Operation;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,7 +41,9 @@ import java.util.regex.Pattern;
  * {@code minMaxArrayLike(shortest, longest)}: empty in one element, it is {@code min 0}. A leaf
  * null in some elements is {@code type OR null} at any depth, as the merge recurses. Elements that disagree on which keys they carry are matched element by element
  * instead, each in its place: pact requires every key of a template on every element, and absent
- * is not null. An array named in {@link GoldenInteraction#anyLength} is matched with no length.
+ * is not null. An array named in {@link GoldenInteraction#anyLength} is matched with no length. A
+ * leaf named in {@link GoldenInteraction#exact} is the recorded value with no matching rule, so the
+ * verifier compares it as equal.
  *
  * <p><b>A request body is the recorded one, exactly.</b> A value recorded as {@code "{param}"} is
  * the state's example here and a provider-state expression for the verifier. A member name
@@ -190,7 +194,8 @@ final class PactBodies {
   // --- the answer --------------------------------------------------------------------------------
 
   /** What the answer is built against: the operation, and the arrays matched with no length. */
-  private record Context(Operation op, List<Pattern> anyLength, Map<Pattern, Shape> templates) {
+  private record Context(Operation op, List<Pattern> anyLength, Map<Pattern, Shape> templates, Set<String> exact,
+      Set<String> bound) {
 
     /** The merged template of the arrays at {@code path}, when {@code path} is one of {@code anyLength}. */
     Shape anyLengthTemplate(String path) {
@@ -213,6 +218,14 @@ final class PactBodies {
    * object or a top-level array.
    */
   static DslPart responseBody(Operation op, JsonNode recorded, List<String> anyLength) {
+    return responseBody(op, recorded, anyLength, List.of());
+  }
+
+  /**
+   * {@link #responseBody(Operation, JsonNode, List)}, the leaves at {@code exact} bound to their
+   * recorded value with no matching rule.
+   */
+  static DslPart responseBody(Operation op, JsonNode recorded, List<String> anyLength, List<String> exact) {
     List<Pattern> patterns = anyLength.stream().map(PactBodies::pattern).toList();
     Map<Pattern, Shape> templates = new LinkedHashMap<>();
     for (Pattern pattern : patterns) {
@@ -226,16 +239,36 @@ final class PactBodies {
         templates.put(pattern, merged);
       }
     }
-    Context ctx = new Context(op, patterns, templates);
+    Set<String> exactPaths = new HashSet<>();
+    for (String path : exact) {
+      exactPaths.add(internal(steps(op.example(path))));
+    }
+    Context ctx = new Context(op, patterns, templates, exactPaths, new HashSet<>());
     if (recorded.isObject()) {
       PactDslJsonBody root = new PactDslJsonBody();
       fillObject(root, Shape.of(recorded), "$", ctx);
+      Set<String> unbound = new HashSet<>(exactPaths);
+      unbound.removeAll(ctx.bound());
+      if (!unbound.isEmpty()) {
+        throw new IllegalStateException("golden master " + op.state() + "/" + op.operationId() + ": exact names "
+            + unbound + ", beneath a keyed object, where one recorded value cannot stand for every key");
+      }
       return root;
+    }
+    if (!exactPaths.isEmpty()) {
+      throw unsupported(op, "$", "an array with exact values beneath it");
     }
     if (recorded.isArray()) {
       return rootArray(Shape.of(recorded), ctx);
     }
     throw unsupported(op, "$", "a " + recorded.getNodeType() + " body; only an object or an array is");
+  }
+
+  /** {@code steps} as the internal path the builder walks: {@code $.a.b}, {@code $.a[*].b}. */
+  static String internal(List<String> steps) {
+    StringBuilder out = new StringBuilder("$");
+    steps.forEach(step -> out.append(step.equals("[]") ? "[*]" : "." + step));
+    return out.toString();
   }
 
   /** {@code path} in the internal form ({@code $.a[*].b}, {@code *} for any key) as an anchored regex. */
@@ -321,6 +354,13 @@ final class PactBodies {
         continue;
       }
       String childPath = path + "." + name;
+      if (ctx.exact().contains(childPath)) {
+        ctx.bound().add(childPath);
+        if (child.kind != Shape.Kind.NULL) {
+          exactLeaf(target, name, child, childPath, op);
+          continue;
+        }
+      }
       switch (child.kind) {
         case NULL -> target.nullValue(name);
         case LEAF -> leaf(target, name, child, childPath, op);
@@ -335,6 +375,28 @@ final class PactBodies {
         case ARRAY -> array(target, name, child, childPath, ctx);
         default -> throw unsupported(op, childPath, "a " + child.kind);
       }
+    }
+  }
+
+  /** The recorded value, no matching rule: the verifier compares it as equal. */
+  private static void exactLeaf(PactDslJsonBody target, String name, Shape leaf, String path, Operation op) {
+    if (leaf.kind != Shape.Kind.LEAF) {
+      throw new IllegalStateException("golden master " + op.state() + "/" + op.operationId() + ": exact names "
+          + path + ", which holds " + leaf.kind + "; exact binds a single string, number or boolean");
+    }
+    if (op.ids().contains(path) || op.instants().contains(path)) {
+      throw new IllegalStateException("golden master " + op.state() + "/" + op.operationId() + ": exact names "
+          + path + ", a frozen value that differs between runs, so it cannot be bound exactly");
+    }
+    JsonNode example = leaf.example;
+    if (example.isTextual()) {
+      target.stringValue(name, example.asText());
+    } else if (example.isNumber()) {
+      target.numberValue(name, example.numberValue());
+    } else if (example.isBoolean()) {
+      target.booleanValue(name, example.asBoolean());
+    } else {
+      throw unsupported(op, path, "a " + example.getNodeType() + " leaf");
     }
   }
 

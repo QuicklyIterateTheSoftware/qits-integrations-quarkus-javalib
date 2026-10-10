@@ -152,7 +152,8 @@ public final class ConsumerPact {
    * Adds the V4 HTTP interaction for {@code row} to {@code builder}: the provider state with its
    * params; the recorded method, path (each {@code {param}} a provider-state expression), query and
    * request body; the row's request headers; the recorded status; the response headers and body
-   * paths the row reads, and nothing else (no body and no {@code Content-Type} when it reads no
+   * paths the row reads (by type, or exactly where {@link GoldenInteraction#exact} names them),
+   * and nothing else (no body and no {@code Content-Type} when it reads no
    * path); and {@code comments.references}, {@code qits-call} and {@code qits-trigger}.
    *
    * @throws ProviderStateMissing when the provider did not record the row's state and operation
@@ -162,7 +163,13 @@ public final class ConsumerPact {
     JsonNode read = row.consumes().isEmpty()
         ? null
         : PactBodies.consumed(masters.json(row.state(), row.operationId()), row.consumes(), op);
-    DslPart answer = read == null ? null : PactBodies.responseBody(op, read, row.anyLength());
+    for (String path : row.exact()) {
+      if (!PactBodies.holds(masters.json(row.state(), row.operationId()), path, op)) {
+        throw new IllegalStateException("golden master " + op.state() + "/" + op.operationId()
+            + ": exact '" + path + "', which the recorded body does not hold");
+      }
+    }
+    DslPart answer = read == null ? null : PactBodies.responseBody(op, read, row.anyLength(), row.exact());
     Map<String, String> answerHeaders = new LinkedHashMap<>();
     for (String name : row.readsHeaders()) {
       String value = op.responseHeader(name);
@@ -226,8 +233,18 @@ public final class ConsumerPact {
       // pact-jvm 4.6's DSL has no setter for an arbitrary comment group, but the V4 model's
       // comments map is mutable and written verbatim.
       http.getInteraction().getComments().put("references", Json.toJson(references));
+      oneOfEachHeader(http.getInteraction().getRequest().getHeaders());
       return http;
     });
+  }
+
+  /**
+   * Keeps the first of headers whose names differ only in case: pact-jvm adds its own
+   * {@code content-type} beside the {@code Content-Type} set here, and a request must carry one.
+   */
+  static void oneOfEachHeader(Map<String, List<String>> headers) {
+    Set<String> seen = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    headers.keySet().removeIf(name -> !seen.add(name));
   }
 
   // --- the consumer test -------------------------------------------------------------------------

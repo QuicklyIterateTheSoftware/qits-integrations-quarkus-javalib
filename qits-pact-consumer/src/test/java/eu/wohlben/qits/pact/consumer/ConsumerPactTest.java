@@ -209,6 +209,80 @@ class ConsumerPactTest {
         OptionalBody.body(json, ContentType.getJSON()));
   }
 
+  static final GoldenInteraction TOKEN = GoldenInteraction.of(Trigger.command("qits login"), "a token request", "token")
+      .consumes("access_token", "token_type", "scope");
+
+  /** An exact leaf is the recorded value with no rule; the others stay type matches. */
+  @Test
+  void anExactLeafIsBoundToItsRecordedValue() {
+    var row = TOKEN.exact("token_type");
+    JsonNode i = interaction(row);
+    JsonNode rules = i.path("response").path("matchingRules").path("body");
+    assertFalse(rules.has("$.token_type"), rules.toString());
+    assertEquals("type", rules.path("$.access_token").path("matchers").get(0).path("match").asText(), rules.toString());
+    assertEquals("Bearer", i.path("response").path("body").path("content").path("token_type").asText());
+    assertEquals(interaction(row).path("response"), interaction(TOKEN.exact("$.token_type")).path("response"));
+
+    var expected = ConsumerPact.of(CONSUMER, FIXTURE, row).pact(List.of(row))
+        .getInteractions().get(0).asSynchronousRequestResponse().getResponse();
+    String other = "{\"access_token\": \"another\", \"token_type\": \"Bearer\", \"scope\": \"other\"}";
+    assertTrue(ResponseMatching.responseMismatches(expected, answer(other)).isEmpty());
+    String wrong = other.replace("\"Bearer\"", "\"bearer-ish\"");
+    String refused = ResponseMatching.responseMismatches(expected, answer(wrong))
+        .stream().map(Mismatch::description).toList().toString();
+    assertTrue(refused.contains("bearer-ish"), refused);
+  }
+
+  @Test
+  void anExactLeafBeneathAWholeConsumedObjectIsBound() {
+    JsonNode i = interaction(GoldenInteraction.of(Trigger.operation("showThing"), "a thing", "getThing")
+        .consumes("owner").exact("owner.name"));
+    JsonNode rules = i.path("response").path("matchingRules").path("body");
+    assertFalse(rules.has("$.owner.name"), rules.toString());
+    assertEquals("fixture", i.path("response").path("body").path("content").path("owner").path("name").asText());
+  }
+
+  @Test
+  void anExactPathThatIsNotConsumedIsRefused() {
+    var refused = assertThrows(IllegalArgumentException.class, () -> TOKEN.exact("expires_in"));
+    assertTrue(refused.getMessage().contains("exact 'expires_in' is not consumed"), refused.getMessage());
+    var elements = GoldenInteraction.of(Trigger.operation("find"), "a thing", "searchThings").consumes("items[]");
+    assertThrows(IllegalArgumentException.class, () -> elements.exact("items"));
+  }
+
+  @Test
+  void anExactPathThatCannotStandForOneValueIsRefused() {
+    var search = GoldenInteraction.of(Trigger.operation("find"), "a thing", "searchThings").consumes("items[].name");
+    var array = assertThrows(IllegalArgumentException.class, () -> search.exact("items[].name"));
+    assertTrue(array.getMessage().contains("crosses an array"), array.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> TOKEN.exact("$"));
+    var thing = GoldenInteraction.of(Trigger.operation("showThing"), "a thing", "getThing").consumes("id", "owner");
+    for (String path : List.of("id", "owner", "owner.colour")) {
+      var refused = assertThrows(IllegalStateException.class, () -> interaction(thing.exact(path)));
+      assertTrue(refused.getMessage().contains(path.equals("owner.colour") ? "does not hold" : "exact"),
+          refused.getMessage());
+    }
+    var keyed = GoldenInteraction.of(Trigger.operation("showRegistry"), "a registry", "getRegistry")
+        .consumes("byId").exact("byId.00000000-0000-4000-8000-000000000001.status");
+    var refused = assertThrows(IllegalStateException.class, () -> interaction(keyed));
+    assertTrue(refused.getMessage().contains("keyed object"), refused.getMessage());
+  }
+
+  /** pact-jvm adds its own lower-case content-type; the request carries one. */
+  @Test
+  void aRequestCarriesOneContentType() {
+    for (var row : List.of(TOKEN, GoldenInteraction.of(Trigger.operation("addThing"), "a thing", "createThing").consumes("id"))) {
+      JsonNode headers = interaction(row).path("request").path("headers");
+      assertEquals(1, fieldNames(headers).stream().filter("content-type"::equalsIgnoreCase).count(), headers.toString());
+    }
+    var headers = new java.util.LinkedHashMap<String, List<String>>();
+    headers.put("Content-Type", List.of("application/json"));
+    headers.put("Authorization", List.of("Bearer x"));
+    headers.put("content-type", List.of("application/json"));
+    ConsumerPact.oneOfEachHeader(headers);
+    assertEquals(List.of("Content-Type", "Authorization"), List.copyOf(headers.keySet()));
+  }
+
   /** The row runs against a mock server: the right request passes, a wrong one fails. */
   @Test
   void aRowRunsAgainstAMockServer() {
