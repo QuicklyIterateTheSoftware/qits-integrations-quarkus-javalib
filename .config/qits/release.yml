@@ -7,6 +7,14 @@ artifacts:
   - { type: maven, name: "eu.wohlben.qits:qits-service-mock", path: qits-service-mock, sbom: qits-service-mock/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-pact-consumer", path: qits-pact-consumer, sbom: qits-pact-consumer/target/sbom.json }
 
+# THE JWKS PACT (ticket qits-1149): qits-auth-core's IdpPactTest writes
+# pacts/qits-integrations-quarkus-javalib_qits-idp-service.json. No `contracts:` entry yet: the row
+# waits for qits-idp to publish its golden masters, so the file does not exist, and the platform
+# refuses a pacts entry with no file. Once the file is committed, add:
+#   contracts:
+#     pacts:
+#       qits-idp-service: { packages: [maven] }
+
 # THIS REPOSITORY HAS NO .qits-maven-settings.xml. The archetype's QA step passes
 # `-s .qits-maven-settings.xml` unconditionally, and Maven refuses to start on a settings file that
 # does not exist — so the gating step would fail before it resolved anything. The release slot is
