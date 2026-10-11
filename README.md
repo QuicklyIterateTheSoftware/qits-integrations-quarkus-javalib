@@ -1,7 +1,7 @@
 # qits-integrations-quarkus-javalib
 
 Quarkus glue every qits service needs and no service owns. The reactor is
-`eu.wohlben.qits:qits-integrations-quarkus`, with six modules today:
+`eu.wohlben.qits:qits-integrations-quarkus`, with seven modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the test-profile budget, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
+| `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
 | `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
 | `qits-pact-consumer/` | `eu.wohlben.qits:qits-pact-consumer` | The consumer half of the contracts: reads providers' golden masters off the test classpath and turns a (provider state, operation) into a pact row that binds only what the consumer reads. Test scope for consumers. |
 
@@ -672,6 +673,71 @@ tier. A caller building requests by hand (`java.net.http.HttpClient`) stamps the
 so grep both on a rename. `CallerEnvironment` follows `CausationScope`'s thread discipline whole:
 restore-not-clear, `remove()` for null, a plain `ThreadLocal` that does not follow work — capture
 `current()` before handing work to an executor and re-establish it with `with(...)`.
+
+---
+
+# qits-http-core
+
+## What it is
+
+Most of the platform calls its neighbours with a raw `java.net.http.HttpClient`, and Quarkus'
+OpenTelemetry instruments only the REST client. A raw request leaves with no `traceparent` and
+nothing naming the caller, so the receiver opens a parentless SERVER span — 5077 of them in three
+hours, measured live — and the trace cannot say whose request it was. This module closes both gaps:
+
+- **`QitsHttpClients`** is an `@ApplicationScoped` bean whose `wrap(HttpClient)` returns a
+  **`TracingHttpClient`**: per request, a CLIENT span (named for the method; `http.request.method`,
+  `url.full` without query or userinfo, `server.address`, `server.port`,
+  `http.response.status_code`; an error on an exception or a 5xx), that span's W3C trace context in
+  the headers, and `X-Qits-Caller` unless the request already carries one. Pool, executor, TLS and
+  lifecycle stay the wrapped client's; a WebSocket handshake is stamped too. With the OpenTelemetry
+  SDK disabled or absent it falls back to a no-op and still stamps the caller.
+- **`CallerClientFilter`** stamps `X-Qits-Caller` on every REST-client request — Quarkus already
+  sends the trace context there, but not the caller. A header the caller set itself wins.
+- **`CallerServerFilter`** records an inbound `X-Qits-Caller` on the current (server) span as
+  `qits.caller`: trimmed, capped at 128 characters, nothing for absent or blank.
+- **`CallerHeader`** is the constants and the value: `quarkus.otel.service.name`, falling back to
+  `quarkus.application.name` — the caller's deployed identity, identical to its spans'
+  `service.name`. A process with neither stamps nothing.
+- **`@RawHttpClient(reason = …)`** is the written opt-out for a class that must keep an unwrapped
+  client — calls to external hosts, which have no business receiving the platform's trace ids, and
+  transports such as an OTLP exporter that must not trace themselves.
+
+The header sits in the edge's reserved `X-Qits-*` namespace, so qits-platform-edge strips any
+client-supplied copy. **It is diagnostic, not authentication**: nothing may authorize on it, and
+`X-Qits-User` stays the principal.
+
+Same packaging bargain as qits-environment-core: API jars only (JAX-RS, annotation, MP-config,
+OpenTelemetry API; CDI API provided), the filters and the bean discovered through the jandex index,
+never an extension on a consumer's classpath.
+
+## Adoption
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-http-core</artifactId>
+</dependency>
+```
+
+```java
+@Inject QitsHttpClients clients;
+
+HttpClient client = clients.wrap(HttpClient.newBuilder()
+    .connectTimeout(Duration.ofSeconds(5))
+    .build());
+```
+
+Build the client once and keep it, as before. A class that must keep a raw client for an external
+host says so where a reviewer reads it:
+
+```java
+@RawHttpClient(reason = "calls api.github.com; no platform headers leave the estate")
+class GithubClient { … }
+```
+
+`QitsHttpClients.wrap(raw, openTelemetry, caller)` is the same wrapper without CDI. qits-arch-rules'
+`HttpClientRules` holds a service to all of this — see there.
 
 ---
 

@@ -4,6 +4,7 @@ artifacts:
   - { type: maven, name: "eu.wohlben.qits:qits-arch-rules", path: qits-arch-rules, sbom: qits-arch-rules/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-db-core", path: qits-db-core, sbom: qits-db-core/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-environment-core", path: qits-environment-core, sbom: qits-environment-core/target/sbom.json }
+  - { type: maven, name: "eu.wohlben.qits:qits-http-core", path: qits-http-core, sbom: qits-http-core/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-service-mock", path: qits-service-mock, sbom: qits-service-mock/target/sbom.json }
   - { type: maven, name: "eu.wohlben.qits:qits-pact-consumer", path: qits-pact-consumer, sbom: qits-pact-consumer/target/sbom.json }
 
