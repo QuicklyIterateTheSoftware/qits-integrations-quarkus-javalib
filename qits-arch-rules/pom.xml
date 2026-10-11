@@ -10,7 +10,7 @@
          built the way the platform is built", so they ship together.
 
          EVERY TYPE THE RULES JUDGE IS NAMED AS A STRING, never as a dependency. The rules reason
-         about jakarta.persistence, qits-eventstream and quarkus-junit5 types, and depending on any
+         about jakarta.persistence, qits-eventstream, qits-http-core and quarkus-junit5 types, and depending on any
          of them would (a) need the platform Maven registry, breaking the clone-alone build rule,
          and (b) couple this module's version to somebody else's for no runtime gain — ArchUnit
          reads bytecode, and bytecode carries names. quarkus-junit5, which TestProfileBudgetRules

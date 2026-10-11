@@ -6,7 +6,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the test-profile budget, and the datasource baseline. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the test-profile budget, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
@@ -271,6 +271,7 @@ failures — over the service's bytecode, and over its configuration:
     importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchRulesTest {
   @ArchTest static final ArchTests CAUSATION = ArchTests.in(CausationRowRules.class);
+  @ArchTest static final ArchTests HTTP_CLIENTS = ArchTests.in(HttpClientRules.class);
 }
 ```
 
@@ -287,6 +288,29 @@ qits-eventstream nor jakarta.persistence. Bytecode carries names, a bare clone b
 platform registry, and the two libraries' versions stay uncoupled. The contract that buys: a rename
 in qits-eventstream must update the rules' constants and the fixture mirror in this module's test
 sources, where the drift surfaces first.
+
+## HttpClientRules
+
+Guards qits-http-core's wrapping, which a service can forget as quietly as a causation row: a raw
+`java.net.http.HttpClient` sends no `traceparent` and no `X-Qits-Caller`, and the receiver's span
+simply loses its parent. One rule, `rawHttpClientsAreWrappedOrDeclared`: no class may call
+`HttpClient.newBuilder()` or `HttpClient.newHttpClient()` unless its nest also touches
+`QitsHttpClients` (inject it and `wrap(...)` the client) or its top-level class carries
+`@RawHttpClient(reason = …)` — the written opt-out for external hosts and OTLP exporters.
+
+A construction in a lambda, an anonymous class or a nested class counts against the **top-level
+class**, and anything in that nest touching `QitsHttpClients` satisfies it: the rule asks whether
+the class decided, not whether one exact expression is wrapped, which bytecode cannot answer and a
+reviewer can. qits-http-core's own package (`eu.wohlben.qits.http`) is exempt. A failure names the
+call site and both repairs. A service that builds no client passes.
+
+```java
+@ArchTest static final ArchTests HTTP_CLIENTS = ArchTests.in(HttpClientRules.class);
+```
+
+Types matched **by name**, as everywhere here: no dependency on qits-http-core, and the fixture
+mirror (`eu.wohlben.qits.http.QitsHttpClients`, `RawHttpClient`) in this module's test sources is
+where a rename surfaces.
 
 ## TestProfileBudgetRules
 
