@@ -52,6 +52,20 @@ public class QitsHttpClients {
     this.caller = CallerHeader.value().orElse(null);
   }
 
+  private QitsHttpClients(OpenTelemetry openTelemetry, String caller) {
+    this.openTelemetry = openTelemetry;
+    this.caller = caller;
+  }
+
+  /**
+   * A bean built by hand, for a test or any other code that constructs its HTTP-calling class
+   * itself and has to hand it the door CDI would have injected. {@code of(OpenTelemetry.noop(),
+   * null)} is the inert one: no span, no header, the raw client's behaviour exactly.
+   */
+  public static QitsHttpClients of(OpenTelemetry openTelemetry, String caller) {
+    return new QitsHttpClients(openTelemetry, caller);
+  }
+
   /** The traced, caller-stamped view of {@code raw}, sharing its pool, executor and lifecycle. */
   public HttpClient wrap(HttpClient raw) {
     return wrap(raw, openTelemetry, caller);
