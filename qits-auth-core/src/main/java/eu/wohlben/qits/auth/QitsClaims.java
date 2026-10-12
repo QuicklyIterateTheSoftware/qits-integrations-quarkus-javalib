@@ -8,9 +8,9 @@ import java.util.Set;
  *
  * <p><b>Claims, not scopes.</b> qits-idp issues no scope strings. A token says that it was minted
  * for this platform ({@code aud}, always {@code qits-platform}) and what it is about ({@code
- * project} / {@code workspace} / {@code branch}); the resource service decides what that permits.
- * Spell the names from here rather than inline — a typo in a claim name reads as "no claim", which
- * is a silent pass on an unenforced path and a silent denial on an enforced one.
+ * project} / {@code workspace} / {@code branch} / {@code agent}); the resource service decides what
+ * that permits. Spell the names from here rather than inline — a typo in a claim name reads as "no
+ * claim", which is a silent pass on an unenforced path and a silent denial on an enforced one.
  *
  * <p>Claims appear on a token only when granted to the client, so absence is normal and never an
  * error by itself.
@@ -38,8 +38,11 @@ public final class QitsClaims {
   /** The branch a token is about. Only meaningful beside {@link #WORKSPACE}. */
   public static final String BRANCH = "branch";
 
+  /** The coding agent a token belongs to; only on an agent's credential. */
+  public static final String AGENT = "agent";
+
   /** Every structured claim qits-idp can grant. */
-  public static final Set<String> NAMES = Set.of(PROJECT, WORKSPACE, BRANCH);
+  public static final Set<String> NAMES = Set.of(PROJECT, WORKSPACE, BRANCH, AGENT);
 
   /**
    * The claim value that covers every value. A client granted {@code project=*} may act on any
