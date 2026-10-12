@@ -27,7 +27,10 @@ public final class CallerHeader {
 
   public static final String NAME = "X-Qits-Caller";
 
-  /** The span attribute {@link CallerServerFilter} records an inbound caller as. */
+  /**
+   * The span attribute {@link CallerServerFilter} and {@link CallerRouteRecorder} record an inbound
+   * caller as.
+   */
   public static final String ATTRIBUTE = "qits.caller";
 
   static final String SERVICE_NAME = "quarkus.otel.service.name";

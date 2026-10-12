@@ -720,6 +720,13 @@ hours, measured live — and the trace cannot say whose request it was. This mod
   sends the trace context there, but not the caller. A header the caller set itself wins.
 - **`CallerServerFilter`** records an inbound `X-Qits-Caller` on the current (server) span as
   `qits.caller`: trimmed, capped at 128 characters, nothing for absent or blank.
+- **`CallerRouteRecorder`** does the same for every request on the Quarkus HTTP router, plain
+  Vert.x routes included — qits-githost's git and blob routes and qits-artifacts' registries are
+  `@Observes Router` handlers no JAX-RS filter ever sees. It is an `@Observes Router` bean itself,
+  one `router.route()` at order -10 000 (ahead of every application route, behind only Quarkus'
+  `Integer.MIN_VALUE` plumbing) that records and always calls `next()`. It reads the SERVER span
+  off the request's own Vert.x context, where Quarkus' OpenTelemetry attached it, falling back to
+  `Span.current()`. A consumer without an HTTP server has no `Router` and never registers it.
 - **`CallerHeader`** is the constants and the value: `quarkus.otel.service.name`, falling back to
   `quarkus.application.name` — the caller's deployed identity, identical to its spans'
   `service.name`. A process with neither stamps nothing.
@@ -732,7 +739,7 @@ client-supplied copy. **It is diagnostic, not authentication**: nothing may auth
 `X-Qits-User` stays the principal.
 
 Same packaging bargain as qits-environment-core: API jars only (JAX-RS, annotation, MP-config,
-OpenTelemetry API; CDI API provided), the filters and the bean discovered through the jandex index,
+OpenTelemetry API; CDI API and vertx-web provided), the filters and the bean discovered through the jandex index,
 never an extension on a consumer's classpath.
 
 ## Adoption

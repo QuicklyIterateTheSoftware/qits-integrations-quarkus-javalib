@@ -62,6 +62,16 @@
         </dependency>
 
         <dependency>
+            <!-- Router and RoutingContext, for CallerRouteRecorder. PROVIDED for the same reason as
+                 the CDI API: every Quarkus HTTP app carries it through quarkus-vertx-http, and a
+                 consumer without an HTTP server never fires the Router observer that needs it.
+                 Version from the imported Quarkus BOM; vertx-core comes with it. -->
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-web</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
