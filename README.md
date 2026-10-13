@@ -738,9 +738,10 @@ The header sits in the edge's reserved `X-Qits-*` namespace, so qits-platform-ed
 client-supplied copy. **It is diagnostic, not authentication**: nothing may authorize on it, and
 `X-Qits-User` stays the principal.
 
-Same packaging bargain as qits-environment-core: API jars only (JAX-RS, annotation, MP-config,
-OpenTelemetry API; CDI API and vertx-web provided), the filters and the bean discovered through the jandex index,
-never an extension on a consumer's classpath.
+API jars (JAX-RS, annotation, MP-config, OpenTelemetry API; CDI API provided), the filters and the
+bean discovered through the jandex index, plus one extension: `quarkus-vertx-http`, compile scope as
+in qits-auth-core. ArC registers CallerRouteRecorder's Router observer in every consumer, so a module
+without an HTTP server of its own fails to boot when the Router class is missing.
 
 ## Adoption
 

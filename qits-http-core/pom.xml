@@ -62,13 +62,12 @@
         </dependency>
 
         <dependency>
-            <!-- Router and RoutingContext, for CallerRouteRecorder. PROVIDED for the same reason as
-                 the CDI API: every Quarkus HTTP app carries it through quarkus-vertx-http, and a
-                 consumer without an HTTP server never fires the Router observer that needs it.
-                 Version from the imported Quarkus BOM; vertx-core comes with it. -->
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-web</artifactId>
-            <scope>provided</scope>
+            <!-- Router and RoutingContext, for CallerRouteRecorder. Compile scope, as in
+                 qits-auth-core: ArC registers the Router observer in every consumer, so a module
+                 without an HTTP server of its own (a domain module's @QuarkusTest) fails to boot
+                 when the class is missing. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-vertx-http</artifactId>
         </dependency>
 
         <dependency>
