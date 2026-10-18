@@ -13,6 +13,8 @@ import au.com.dius.pact.core.model.HttpResponse;
 import au.com.dius.pact.core.model.OptionalBody;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -392,6 +394,48 @@ class ConsumerPactTest {
     pact.assertEveryInteractionCarriesBothReferences();
     Files.writeString(file, Files.readString(file).replace("showThing", "showAnotherThing"));
     withProperties(dir, false, () -> assertThrows(AssertionError.class, pact::compareOrWritePactFile));
+  }
+
+  /** A qits-maintenance bump of the via library: the version-only diff refreshes, not fails. */
+  @Test
+  void aLibraryBumpOnlyRefreshesTheViaVersion(@TempDir Path dir) throws Exception {
+    Via oldVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "1.0.0");
+    Via newVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "2.0.0");
+    ConsumerPact was = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(oldVersion);
+    Path file = dir.resolve("qits-fixture-consumer_qits-eventstream-javalib_qits-fixture-service.json");
+    withProperties(dir, true, was::compareOrWritePactFile);
+    assertTrue(Files.readString(file).contains("\"version\": \"1.0.0\""));
+
+    ConsumerPact bumped = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(newVersion);
+    ByteArrayOutputStream printed = new ByteArrayOutputStream();
+    PrintStream original = System.out;
+    System.setOut(new PrintStream(printed));
+    try {
+      withProperties(dir, false, bumped::compareOrWritePactFile); // must not throw
+    } finally {
+      System.setOut(original);
+    }
+    assertTrue(printed.toString().contains("via version refreshed 1.0.0"), printed.toString());
+    assertTrue(printed.toString().contains("2.0.0"), printed.toString());
+    String committedAfter = Files.readString(file);
+    assertTrue(committedAfter.contains("\"version\": \"2.0.0\""), committedAfter);
+    assertFalse(committedAfter.contains("\"version\": \"1.0.0\""), committedAfter);
+    bumped.assertEveryInteractionCarriesBothReferences();
+  }
+
+  /** A version bump alongside an unrelated change is still a real diff, and still fails. */
+  @Test
+  void aRealDiffAlongsideTheVersionStillFails(@TempDir Path dir) throws Exception {
+    Via oldVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "1.0.0");
+    Via newVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "2.0.0");
+    ConsumerPact was = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(oldVersion);
+    Path file = dir.resolve("qits-fixture-consumer_qits-eventstream-javalib_qits-fixture-service.json");
+    withProperties(dir, true, was::compareOrWritePactFile);
+    Files.writeString(file, Files.readString(file).replace("showThing", "showAnotherThing"));
+
+    ConsumerPact bumped = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(newVersion);
+    withProperties(dir, false, () -> assertThrows(AssertionError.class, bumped::compareOrWritePactFile));
+    assertTrue(Files.readString(file).contains("\"version\": \"1.0.0\""), "untouched: the real diff left it as is");
   }
 
   @Test

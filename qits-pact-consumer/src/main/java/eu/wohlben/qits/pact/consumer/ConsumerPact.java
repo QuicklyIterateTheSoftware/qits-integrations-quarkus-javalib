@@ -41,7 +41,11 @@ import org.junit.jupiter.api.Assumptions;
  * <p><b>A call made through a library</b> (ticket qits-1163) is still pacted by the service that
  * consumes the answer, not by the library: the service is the {@code consumer}, {@link #via}
  * names the library, and the committed file becomes the three-part {@code
- * pacts/<consumer>_<library-repo>_<provider>.json} — see {@link #file}.
+ * pacts/<consumer>_<library-repo>_<provider>.json} — see {@link #file}. Every such row is pacted
+ * with the version the consuming service <em>currently</em> pins — {@code
+ * comments.references.qits-via.version} always names it — so a library bump is not a contract
+ * change; only the committed label can lag, and {@link #compareOrWritePactFile} refreshes it in
+ * place rather than failing on that alone.
  *
  * <pre>{@code
  * static final GoldenMasters IDP = GoldenMasters.of("qits-idp-service", "qits-idp");
@@ -325,6 +329,14 @@ public final class ConsumerPact {
    * by default, rewritten under {@code -Dgolden.update=true} (or {@code QITS_GOLDEN_UPDATE=true}).
    * The raw pact is also left in {@code target/pacts/} for inspection. Skipped, naming what is
    * missing, while no row is recorded and no file is committed: there is nothing to publish yet.
+   *
+   * <p><b>A difference confined to {@code comments.references.qits-via.version}</b> (ticket
+   * qits-1163) does not fail: every row made through a library is pacted with the version the
+   * consuming service <em>currently</em> pins, so a qits-maintenance bump of that library is
+   * exactly such a diff, and only the committed label lags until this runs locally. Such a diff
+   * instead rewrites the committed file in place — no {@code -Dgolden.update} needed — and prints
+   * {@code via version refreshed <old> → <new>}. Any other difference, including one that also
+   * touches the version, still fails as before.
    */
   public void compareOrWritePactFile() {
     Path committed = pactsDirectory().resolve(file());
@@ -339,10 +351,62 @@ public final class ConsumerPact {
       Path scratch = Path.of("target", "pacts", file());
       Files.createDirectories(scratch.getParent());
       Files.writeString(scratch, raw);
-      GoldenFiles.compareOrWrite(committed, normalise(raw));
+      String actual = normalise(raw);
+      if (GoldenFiles.updating() || !refreshedViaVersion(committed, actual)) {
+        GoldenFiles.compareOrWrite(committed, actual);
+      }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /**
+   * Whether {@code committed} and {@code actual} differ only in {@code
+   * comments.references.qits-via.version} — masked to the same placeholder on both sides before
+   * comparing — in which case {@code committed} is rewritten to {@code actual} (the real,
+   * unmasked pact) and the refresh is printed. Returns {@code false}, doing nothing, when the
+   * files are identical, {@code committed} does not exist yet, or any other difference remains
+   * once the version is masked: each of those is left to {@link GoldenFiles#compareOrWrite} to
+   * handle as it always has.
+   */
+  private boolean refreshedViaVersion(Path committed, String actual) throws IOException {
+    if (!Files.exists(committed)) {
+      return false;
+    }
+    String committedText = Files.readString(committed);
+    if (committedText.equals(actual)) {
+      return false;
+    }
+    JsonNode committedPact = MAPPER.readTree(committedText);
+    JsonNode actualPact = MAPPER.readTree(actual);
+    if (!maskViaVersions(committedPact).equals(maskViaVersions(actualPact))) {
+      return false;
+    }
+    Files.writeString(committed, actual);
+    System.out.println("via version refreshed " + viaVersion(committedPact) + " → " + viaVersion(actualPact));
+    return true;
+  }
+
+  /** {@code pact}, deep-copied, with every interaction's {@code qits-via.version} set to {@code "*"}. */
+  private static JsonNode maskViaVersions(JsonNode pact) {
+    JsonNode masked = pact.deepCopy();
+    masked.path("interactions").forEach(interaction -> {
+      if (interaction.path("comments").path("references").path("qits-via") instanceof ObjectNode via) {
+        via.put("version", "*");
+      }
+    });
+    return masked;
+  }
+
+  /** The first {@code qits-via.version} found in {@code pact}'s interactions; {@code "?"} when none carry one. */
+  private static String viaVersion(JsonNode pact) {
+    for (JsonNode interaction : pact.path("interactions")) {
+      JsonNode version = interaction.path("comments").path("references").path("qits-via").path("version");
+      if (version.isTextual()) {
+        return version.asText();
+      }
+    }
+    return "?";
   }
 
   /** The pact of the recorded rows, normalised as the committed file is. */

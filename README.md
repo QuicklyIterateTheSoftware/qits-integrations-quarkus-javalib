@@ -902,3 +902,10 @@ exception: a client the provider publishes from its own repository (`qits-contai
 from `qits-containers-service`) names the same repository as the provider, so the file keeps the
 plain two-part name — writing the provider's repository twice would say nothing a two-part name
 does not already say.
+
+Every via row is pacted with the version the consuming service *currently* pins, so a
+qits-maintenance bump of that library is not a contract change — only the committed file's label
+can lag until this runs locally again. `compareOrWritePactFile` masks `qits-via.version` on both
+sides before comparing: when that is the only difference, it rewrites the committed file in
+place (no `-Dgolden.update` needed) and prints `via version refreshed <old> → <new>` instead of
+failing. Any other difference, even one that also touches the version, still fails as before.
