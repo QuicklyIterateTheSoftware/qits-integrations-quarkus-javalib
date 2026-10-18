@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
@@ -36,6 +37,11 @@ import org.junit.jupiter.api.Assumptions;
  * <b>Everything one consumer asks one provider</b> (epic qits-546, ticket qits-1149): its rows, the
  * pact they make, the consumer test that runs a row against a pact mock server, and the committed
  * pact file {@code pacts/<consumer>_<provider>.json}.
+ *
+ * <p><b>A call made through a library</b> (ticket qits-1163) is still pacted by the service that
+ * consumes the answer, not by the library: the service is the {@code consumer}, {@link #via}
+ * names the library, and the committed file becomes the three-part {@code
+ * pacts/<consumer>_<library-repo>_<provider>.json} — see {@link #file}.
  *
  * <pre>{@code
  * static final GoldenMasters IDP = GoldenMasters.of("qits-idp-service", "qits-idp");
@@ -74,11 +80,13 @@ public final class ConsumerPact {
   private final String consumer;
   private final GoldenMasters masters;
   private final List<GoldenInteraction> rows;
+  private final Via via;
 
-  private ConsumerPact(String consumer, GoldenMasters masters, List<GoldenInteraction> rows) {
+  private ConsumerPact(String consumer, GoldenMasters masters, List<GoldenInteraction> rows, Via via) {
     this.consumer = Objects.requireNonNull(consumer, "consumer");
     this.masters = Objects.requireNonNull(masters, "masters");
     this.rows = List.copyOf(rows);
+    this.via = via;
     Set<String> unique = new HashSet<>();
     for (GoldenInteraction row : this.rows) {
       if (!unique.add(row.description() + "\u0000" + row.state())) {
@@ -94,12 +102,12 @@ public final class ConsumerPact {
    * @param consumer the consumer's repository name, as the pact names it
    */
   public static ConsumerPact of(String consumer, GoldenMasters masters, GoldenInteraction... rows) {
-    return new ConsumerPact(consumer, masters, List.of(rows));
+    return new ConsumerPact(consumer, masters, List.of(rows), null);
   }
 
   /** {@link #of(String, GoldenMasters, GoldenInteraction...)} over a list. */
   public static ConsumerPact of(String consumer, GoldenMasters masters, List<GoldenInteraction> rows) {
-    return new ConsumerPact(consumer, masters, rows);
+    return new ConsumerPact(consumer, masters, rows, null);
   }
 
   public String consumer() {
@@ -114,8 +122,32 @@ public final class ConsumerPact {
     return rows;
   }
 
-  /** The committed pact's file name: both sides by repository name. */
+  /**
+   * The same pact, made through {@code via}: a library calls the provider on the consumer's
+   * behalf, so the consumer stays {@code consumer} and {@code qits-trigger.app}, but the pact
+   * also names the library and the file carries all three parties.
+   */
+  public ConsumerPact via(Via via) {
+    return new ConsumerPact(consumer, masters, rows, via);
+  }
+
+  /** The library the calls go through, when this pact is one of those; empty for a direct call. */
+  public Optional<Via> via() {
+    return Optional.ofNullable(via);
+  }
+
+  /**
+   * The committed pact's file name: both sides by repository name, plus the library's repository
+   * name in the middle when {@link #via} is set — {@code <consumer>_<via-repo>_<provider>.json} —
+   * <b>except</b> when the library and the provider share a repository (a client the provider
+   * publishes from its own repository, such as {@code qits-containers-client} from {@code
+   * qits-containers-service}), where naming it twice would say nothing a two-part name does not
+   * already say, so the name stays the plain {@code <consumer>_<provider>.json}.
+   */
   public String file() {
+    if (via != null && !via.repository().equals(masters.repository())) {
+      return consumer + "_" + via.repository() + "_" + masters.repository() + ".json";
+    }
     return consumer + "_" + masters.repository() + ".json";
   }
 
@@ -154,7 +186,9 @@ public final class ConsumerPact {
    * request body; the row's request headers; the recorded status; the response headers and body
    * paths the row reads (by type, or exactly where {@link GoldenInteraction#exact} names them),
    * and nothing else (no body and no {@code Content-Type} when it reads no
-   * path); and {@code comments.references}, {@code qits-call} and {@code qits-trigger}.
+   * path); and {@code comments.references}, {@code qits-call} and {@code qits-trigger} (and,
+   * when {@link #via} is set, {@code qits-via} naming the library — {@code qits-trigger}'s app
+   * stays the consumer either way).
    *
    * @throws ProviderStateMissing when the provider did not record the row's state and operation
    */
@@ -185,6 +219,9 @@ public final class ConsumerPact {
     call.put("operationId", row.operationId());
     references.put("qits-call", call);
     references.put("qits-trigger", row.trigger().reference(consumer));
+    if (via != null) {
+      references.put("qits-via", via.reference());
+    }
     return builder.expectsToReceiveHttpInteraction(row.description(), http -> {
       http.state(row.state(), new LinkedHashMap<String, Object>(op.params()));
       http.withRequest(r -> {
@@ -325,7 +362,10 @@ public final class ConsumerPact {
   /**
    * Both references on every interaction, as the platform reads them: {@code qits-call} naming
    * this provider and the operation, {@code qits-trigger} naming kind, app and the trigger's own
-   * value, every value a non-blank string; one interaction per recorded row.
+   * value, every value a non-blank string; one interaction per recorded row. When {@link #via}
+   * is set, every interaction also carries {@code qits-via} naming the library (repository,
+   * artifact, version) and {@code qits-trigger.app} still names the consumer; when it is not,
+   * no interaction carries {@code qits-via}.
    */
   public void assertEveryInteractionCarriesBothReferences() {
     JsonNode pact = normalisedPact();
@@ -343,6 +383,16 @@ public final class ConsumerPact {
       JsonNode trigger = references.path("qits-trigger");
       assertStrings(description, trigger, 3);
       Assertions.assertTrue(trigger.has("kind") && trigger.has("app"), description + ": trigger kind and app");
+      Assertions.assertEquals(consumer, trigger.path("app").asText(), description + ": trigger app stays the consumer");
+      if (via != null) {
+        JsonNode viaRef = references.path("qits-via");
+        assertStrings(description, viaRef, 3);
+        Assertions.assertEquals(via.repository(), viaRef.path("repository").asText(), description);
+        Assertions.assertEquals(via.artifact(), viaRef.path("artifact").asText(), description);
+        Assertions.assertEquals(via.version(), viaRef.path("version").asText(), description);
+      } else {
+        Assertions.assertFalse(references.has("qits-via"), description + ": no via, but qits-via is present");
+      }
     }
   }
 

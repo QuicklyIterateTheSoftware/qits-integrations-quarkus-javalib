@@ -76,6 +76,51 @@ class ConsumerPactTest {
     assertEquals("showThing", references.path("qits-trigger").path("operationId").asText());
   }
 
+  static final Via EVENTSTREAM = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "2026.1.100000");
+
+  @Test
+  void viaChangesTheFileNameToThreeParts() {
+    ConsumerPact direct = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING);
+    assertEquals("qits-fixture-consumer_qits-fixture-service.json", direct.file());
+    assertTrue(direct.via().isEmpty());
+
+    ConsumerPact viaLibrary = direct.via(EVENTSTREAM);
+    assertEquals("qits-fixture-consumer_qits-eventstream-javalib_qits-fixture-service.json", viaLibrary.file());
+    assertEquals(EVENTSTREAM, viaLibrary.via().orElseThrow());
+    assertEquals(direct.consumer(), viaLibrary.consumer());
+    assertEquals(direct.masters(), viaLibrary.masters());
+    assertEquals(direct.rows(), viaLibrary.rows());
+  }
+
+  /** A client the provider itself publishes: naming its own repository twice would say nothing new. */
+  @Test
+  void aProviderOwnedClientKeepsTheTwoPartFileName() {
+    Via ownClient = new Via(FIXTURE.repository(), "eu.wohlben.qits:qits-fixture-client", "1.0.0");
+    ConsumerPact pact = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(ownClient);
+    assertEquals("qits-fixture-consumer_qits-fixture-service.json", pact.file());
+  }
+
+  @Test
+  void qitsViaIsCarriedOnEveryInteractionWhenSet() {
+    ConsumerPact pact = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(EVENTSTREAM);
+    JsonNode references = pact.normalisedPact(List.of(GET_THING)).path("interactions").get(0)
+        .path("comments").path("references");
+    JsonNode via = references.path("qits-via");
+    assertEquals(EVENTSTREAM.repository(), via.path("repository").asText());
+    assertEquals(EVENTSTREAM.artifact(), via.path("artifact").asText());
+    assertEquals(EVENTSTREAM.version(), via.path("version").asText());
+    assertEquals("operation", references.path("qits-trigger").path("kind").asText());
+    assertEquals(CONSUMER, references.path("qits-trigger").path("app").asText(), "trigger app stays the consumer");
+    pact.assertEveryInteractionCarriesBothReferences();
+  }
+
+  @Test
+  void qitsViaIsAbsentWithoutVia() {
+    JsonNode references = interaction(GET_THING).path("comments").path("references");
+    assertFalse(references.has("qits-via"), references.toString());
+    ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).assertEveryInteractionCarriesBothReferences();
+  }
+
   @Test
   void aStatusOnlyRowHasNoBody() {
     JsonNode i = interaction(GoldenInteraction.of(Trigger.operation("removeThing"), "a thing", "deleteThing"));

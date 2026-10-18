@@ -889,3 +889,16 @@ void readsTheKeys() { PACT.run(JWKS, (url, recorded) -> /* the real client again
   `@Disabled` carries. Delete `@Disabled` once the provider records it.
 - `compareOrWritePactFile` compares `pacts/<consumer>_<provider>.json` in the repository root;
   `-Dgolden.update=true` rewrites it. While no row is recorded and no file exists, it is skipped.
+
+**A call a library makes on the consumer's behalf** (ticket qits-1163) is still pacted by the
+service that consumes the answer, not by the library: that service stays `consumer`, and
+`PACT.via(new Via(repository, artifact, version))` names the library — its repository
+(`qits-eventstream-javalib`), its maven coordinate (`eu.wohlben.qits:qits-eventstream`), and the
+version the consuming service pins. With a via set, the committed file gets a third part —
+`pacts/<consumer>_<library-repo>_<provider>.json` — and every interaction's
+`comments.references.qits-via` carries `{repository, artifact, version}` beside `qits-call` and
+`qits-trigger` (`qits-trigger.app` still names the consumer, never the library). The one
+exception: a client the provider publishes from its own repository (`qits-containers-client`
+from `qits-containers-service`) names the same repository as the provider, so the file keeps the
+plain two-part name — writing the provider's repository twice would say nothing a two-part name
+does not already say.
