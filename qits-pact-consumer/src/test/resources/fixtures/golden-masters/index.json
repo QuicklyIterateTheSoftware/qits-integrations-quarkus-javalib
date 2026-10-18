@@ -83,6 +83,42 @@
       ]
     },
     {
+      "name": "a bundle",
+      "slug": "a-bundle",
+      "params": { "version": "2100.1.0" },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "putBundle",
+          "method": "PUT",
+          "path": "/fixture/api/bundles/{version}",
+          "contentType": "application/gzip",
+          "bodyBase64": "Zml4dHVyZSBidW5kbGUgAAEC/w==",
+          "status": 201,
+          "file": "a-bundle/putBundle.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "getSbom",
+          "method": "GET",
+          "path": "/fixture/api/bundles/{version}/sbom",
+          "status": 200,
+          "file": "a-bundle/getSbom.json",
+          "headers": { "Content-Type": "application/vnd.cyclonedx+json; version=1.6" },
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        },
+        {
+          "operationId": "listRuns",
+          "method": "GET",
+          "path": "/fixture/api/bundles/{version}/runs",
+          "status": 200,
+          "file": "a-bundle/listRuns.json",
+          "headers": { "Content-Type": "application/json;charset=UTF-8" },
+          "frozen": { "ids": ["$.runs[*].runId"], "instants": [], "strings": ["$.runs[*].runId"], "listFilteredTo": null }
+        }
+      ]
+    },
+    {
       "name": "a registry",
       "slug": "a-registry",
       "params": {},

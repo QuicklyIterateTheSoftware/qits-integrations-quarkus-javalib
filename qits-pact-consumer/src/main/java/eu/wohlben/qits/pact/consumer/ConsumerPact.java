@@ -187,10 +187,12 @@ public final class ConsumerPact {
   /**
    * Adds the V4 HTTP interaction for {@code row} to {@code builder}: the provider state with its
    * params; the recorded method, path (each {@code {param}} a provider-state expression), query and
-   * request body; the row's request headers; the recorded status; the response headers and body
+   * request body (a binary one, recorded as {@code bodyBase64}, byte for byte under its recorded
+   * content type); the row's request headers; the recorded status; the response headers and body
    * paths the row reads (by type, or exactly where {@link GoldenInteraction#exact} names them),
    * and nothing else (no body and no {@code Content-Type} when it reads no
-   * path); and {@code comments.references}, {@code qits-call} and {@code qits-trigger} (and,
+   * path; when it does, a {@code Content-Type} matching the recorded media type, see {@link
+   * #answerContentType}); and {@code comments.references}, {@code qits-call} and {@code qits-trigger} (and,
    * when {@link #via} is set, {@code qits-via} naming the library — {@code qits-trigger}'s app
    * stays the consumer either way).
    *
@@ -251,7 +253,12 @@ public final class ConsumerPact {
           }
         });
         JsonNode body = op.body();
-        if (body != null && body.isTextual()) {
+        if (op.binaryBody() != null) {
+          // A binary upload (bodyBase64 in the index): the recorded bytes, under the recorded type.
+          String type = op.contentType() == null ? "application/octet-stream" : op.contentType();
+          r.header("Content-Type", type);
+          r.body(op.binaryBody(), type);
+        } else if (body != null && body.isTextual()) {
           // A form or another non-JSON body: the recorded text, each {param} its example.
           String type = op.contentType() == null ? "text/plain" : op.contentType();
           r.header("Content-Type", type);
@@ -266,8 +273,7 @@ public final class ConsumerPact {
         response.status(op.status());
         answerHeaders.forEach((name, value) -> response.header(name, Matchers.regexp(".+", value)));
         if (answer != null) {
-          response.header("Content-Type", Matchers.regexp("application/json.*", "application/json"))
-              .body(answer);
+          response.header("Content-Type", answerContentType(op)).body(answer);
         }
         return response;
       });
@@ -277,6 +283,22 @@ public final class ConsumerPact {
       oneOfEachHeader(http.getInteraction().getRequest().getHeaders());
       return http;
     });
+  }
+
+  /**
+   * The {@code Content-Type} matcher of a JSON answer: {@code application/json.*} — or, when the
+   * recording's own {@code Content-Type} names another media type ({@code
+   * application/vnd.cyclonedx+json; version=1.6}), that media type followed by anything, its
+   * recorded value the example. The verifier compares the real answer's header against it, so a
+   * hard-coded {@code application/json} would refuse a provider that answers what it recorded.
+   */
+  static Object answerContentType(Operation op) {
+    String recorded = op.responseHeader("Content-Type");
+    String media = recorded == null ? "" : recorded.split(";", 2)[0].trim();
+    if (media.isEmpty() || media.equalsIgnoreCase("application/json")) {
+      return Matchers.regexp("application/json.*", "application/json");
+    }
+    return Matchers.regexp(media.replaceAll("[^A-Za-z0-9/-]", "\\\\$0") + ".*", recorded);
   }
 
   /**

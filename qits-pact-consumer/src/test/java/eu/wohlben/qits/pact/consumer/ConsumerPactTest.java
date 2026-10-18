@@ -185,6 +185,81 @@ class ConsumerPactTest {
         request.toString());
   }
 
+  static final byte[] BUNDLE = java.util.Base64.getDecoder().decode("Zml4dHVyZSBidW5kbGUgAAEC/w==");
+
+  static final GoldenInteraction PUT_BUNDLE =
+      GoldenInteraction.of(Trigger.command("qits publish docs"), "a bundle", "putBundle").consumes("version");
+
+  /** A body recorded as bodyBase64 is sent byte for byte, under its recorded type: not dropped. */
+  @Test
+  void aBinaryBodyIsSentByteForByteWithItsContentType() {
+    JsonNode request = interaction(PUT_BUNDLE).path("request");
+    JsonNode body = request.path("body");
+    assertEquals("base64", body.path("encoded").asText(), request.toString());
+    assertEquals("application/gzip", body.path("contentType").asText(), request.toString());
+    assertTrue(java.util.Arrays.equals(BUNDLE, java.util.Base64.getDecoder().decode(body.path("content").asText())));
+    assertTrue(request.path("headers").path("Content-Type").toString().contains("application/gzip"), request.toString());
+    assertEquals("/fixture/api/bundles/2100.1.0", request.path("path").asText());
+  }
+
+  @Test
+  void aBinaryRowRunsAgainstAMockServerOnlyWithTheRecordedBytes() {
+    ConsumerPact pact = ConsumerPact.of(CONSUMER, FIXTURE, PUT_BUNDLE);
+    pact.run(PUT_BUNDLE, (url, recorded) -> {
+      java.net.http.HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath()))
+          .header("Content-Type", "application/gzip").PUT(HttpRequest.BodyPublishers.ofByteArray(BUNDLE)).build(),
+          java.net.http.HttpResponse.BodyHandlers.ofString());
+      assertEquals(201, answer.statusCode());
+    });
+    assertThrows(AssertionError.class, () -> pact.run(PUT_BUNDLE, (url, recorded) ->
+        HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath()))
+            .header("Content-Type", "application/gzip").PUT(HttpRequest.BodyPublishers.noBody()).build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString())));
+  }
+
+  /** A JSON answer of another media type is matched on that type, never a hard-coded application/json. */
+  @Test
+  void aJsonAnswerOfAnotherMediaTypeIsMatchedOnTheRecordedType() {
+    var row = GoldenInteraction.of(Trigger.operation("readSbom"), "a bundle", "getSbom").consumes("bomFormat");
+    JsonNode response = interaction(row).path("response");
+    assertEquals("application/vnd.cyclonedx+json; version=1.6", response.path("headers").path("Content-Type").get(0).asText());
+    JsonNode rule = response.path("matchingRules").path("header").path("Content-Type").path("matchers").get(0);
+    assertEquals("application/vnd\\.cyclonedx\\+json.*", rule.path("regex").asText(), response.toString());
+    var expected = ConsumerPact.of(CONSUMER, FIXTURE, row).pact(List.of(row))
+        .getInteractions().get(0).asSynchronousRequestResponse().getResponse();
+    String sbom = "{\"bomFormat\": \"CycloneDX\"}";
+    var accepted = ResponseMatching.responseMismatches(expected, new HttpResponse(200,
+        Map.of("Content-Type", List.of("application/vnd.cyclonedx+json; version=1.6")),
+        OptionalBody.body(sbom, new ContentType("application/vnd.cyclonedx+json"))));
+    assertTrue(accepted.isEmpty(), accepted.stream().map(Mismatch::description).toList().toString());
+    var refused = ResponseMatching.responseMismatches(expected, answer(sbom));
+    assertFalse(refused.isEmpty(), "plain application/json is not the recorded type");
+  }
+
+  @Test
+  void aPlainJsonAnswerKeepsTheApplicationJsonMatcher() {
+    for (var row : List.of(GET_THING, GoldenInteraction.of(Trigger.operation("showRuns"), "a bundle", "listRuns")
+        .consumes("runs[].runId"))) {
+      JsonNode rule = interaction(row).path("response").path("matchingRules").path("header")
+          .path("Content-Type").path("matchers").get(0);
+      assertEquals("application/json.*", rule.path("regex").asText(), row.description());
+    }
+  }
+
+  /** A path the recorder lists under both ids and strings holds non-UUIDs too: a type match. */
+  @Test
+  void aPathFrozenAsBothIdAndStringIsMatchedAsAString() {
+    var row = GoldenInteraction.of(Trigger.operation("showRuns"), "a bundle", "listRuns").consumes("runs[].runId");
+    assertFalse(FIXTURE.operation("a bundle", "listRuns").ids().contains("$.runs[*].runId"));
+    JsonNode rules = interaction(row).path("response").path("matchingRules").path("body");
+    assertEquals("type", rules.path("$.runs[*].runId").path("matchers").get(0).path("match").asText(), rules.toString());
+    var expected = ConsumerPact.of(CONSUMER, FIXTURE, row).pact(List.of(row))
+        .getInteractions().get(0).asSynchronousRequestResponse().getResponse();
+    var mismatches = ResponseMatching.responseMismatches(expected, answer(
+        "{\"runs\": [{\"runId\": \"bump-00000000-0000-4000-8000-000000000033\"}, {\"runId\": \"00000000-0000-4000-8000-000000000034\"}]}"));
+    assertTrue(mismatches.isEmpty(), mismatches.stream().map(Mismatch::description).toList().toString());
+  }
+
   @Test
   void aResponseHeaderTheConsumerReadsIsBound() {
     JsonNode response = interaction(GoldenInteraction.of(Trigger.operation("readFile"), "a thing", "getThingFile")

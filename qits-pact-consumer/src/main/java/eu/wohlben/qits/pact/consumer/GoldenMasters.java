@@ -10,6 +10,7 @@ import java.net.URL;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
@@ -95,7 +96,10 @@ public final class GoldenMasters {
    * @param query the recorded query, each name with its values in order; empty for none
    * @param contentType the request body's media type; null when the index names none
    * @param body the request body: JSON as recorded, or a text node for a non-JSON body (a form);
-   *     null for an operation that takes none
+   *     null for an operation that takes none, or one recorded as {@code binaryBody}
+   * @param binaryBody a binary request body ({@code bodyBase64} in the index, e.g. a gzipped
+   *     bundle), decoded; null unless the recording carries one. Sent byte for byte under {@code
+   *     contentType}
    * @param responseHeaders the response headers the provider recorded, by name
    */
   public record Operation(
@@ -107,6 +111,7 @@ public final class GoldenMasters {
       Map<String, List<String>> query,
       String contentType,
       JsonNode body,
+      byte[] binaryBody,
       int status,
       String file,
       Set<String> ids,
@@ -260,6 +265,7 @@ public final class GoldenMasters {
     });
     query.replaceAll((k, v) -> List.copyOf(v));
     JsonNode body = op.get("body");
+    JsonNode bodyBase64 = op.get("bodyBase64");
     JsonNode contentType = op.get("contentType");
     Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     JsonNode recordedHeaders = op.has("responseHeaders") ? op.get("responseHeaders") : op.path("headers");
@@ -273,9 +279,10 @@ public final class GoldenMasters {
         Collections.unmodifiableMap(query),
         contentType == null || contentType.isNull() ? null : contentType.asText(),
         body == null || body.isNull() ? null : body,
+        bodyBase64 == null || bodyBase64.isNull() ? null : Base64.getDecoder().decode(bodyBase64.asText()),
         op.path("status").asInt(),
         op.path("file").asText(),
-        strings(frozen.path("ids")),
+        idsOnly(frozen),
         strings(frozen.path("instants")),
         strings(frozen.path("strings")),
         strings(frozen.path("keys")),
@@ -362,6 +369,17 @@ public final class GoldenMasters {
   private static ClassLoader loader() {
     ClassLoader context = Thread.currentThread().getContextClassLoader();
     return context != null ? context : GoldenMasters.class.getClassLoader();
+  }
+
+  /**
+   * {@code frozen.ids} without the paths {@code frozen.strings} lists too: the recorder lists a path
+   * by what each value at it was, so an array holding a whole UUID in some elements and a UUID
+   * inside a longer string in others lands in both, and only a type match holds every element.
+   */
+  private static Set<String> idsOnly(JsonNode frozen) {
+    Set<String> ids = new LinkedHashSet<>(strings(frozen.path("ids")));
+    ids.removeAll(strings(frozen.path("strings")));
+    return Collections.unmodifiableSet(ids);
   }
 
   private static Set<String> strings(JsonNode array) {

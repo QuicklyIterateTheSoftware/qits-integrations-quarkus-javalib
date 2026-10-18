@@ -26,7 +26,8 @@ import java.util.regex.Pattern;
  * <p><b>The frozen lists are read from the index, never inferred from a value's shape.</b>
  *
  * <ul>
- *   <li>{@code frozen.ids}: a UUID regex;
+ *   <li>{@code frozen.ids}: a UUID regex — unless {@code frozen.strings} lists the path too, which
+ *       makes it a string (some values there are not a bare UUID);
  *   <li>{@code frozen.instants}: an ISO-8601 regex ({@link #ISO_INSTANT});
  *   <li>{@code frozen.strings} and every other leaf: a type match ({@code type OR null} where some
  *       recorded element held null);
