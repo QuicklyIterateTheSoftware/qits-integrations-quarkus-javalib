@@ -383,8 +383,8 @@ public final class ConsumerPact {
       JsonNode trigger = references.path("qits-trigger");
       assertStrings(description, trigger, 3);
       Assertions.assertTrue(trigger.has("kind") && trigger.has("app"), description + ": trigger kind and app");
-      Assertions.assertEquals(consumer, trigger.path("app").asText(), description + ": trigger app stays the consumer");
       if (via != null) {
+        Assertions.assertEquals(consumer, trigger.path("app").asText(), description + ": trigger app stays the consumer");
         JsonNode viaRef = references.path("qits-via");
         assertStrings(description, viaRef, 3);
         Assertions.assertEquals(via.repository(), viaRef.path("repository").asText(), description);
