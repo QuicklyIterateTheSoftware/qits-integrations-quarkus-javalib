@@ -15,7 +15,7 @@
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
-        <version>2026.1018.135552</version>
+        <version>2026.1018.142240</version>
     </parent>
 
     <artifactId>qits-pact-consumer</artifactId>
