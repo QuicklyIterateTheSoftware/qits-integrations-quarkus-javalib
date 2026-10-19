@@ -30,7 +30,9 @@ import java.util.regex.Pattern;
  *       makes it a string (some values there are not a bare UUID);
  *   <li>{@code frozen.instants}: an ISO-8601 regex ({@link #ISO_INSTANT});
  *   <li>{@code frozen.strings} and every other leaf: a type match ({@code type OR null} where some
- *       recorded element held null);
+ *       recorded element held null) — a number recorded as an integer by {@code number}, one recorded
+ *       with a fraction or an exponent by {@code type}, which accepts {@code 1.5E8} where pact-jvm's
+ *       {@code number} does not;
  *   <li>{@code frozen.keys}: an object keyed by a frozen value, matched with {@code eachKeyLike};
  *       the paths beneath it name the key {@code *};
  *   <li>{@code frozen.listFilteredTo}: the array the recorder reduced to the state's own entities,
@@ -421,6 +423,8 @@ final class PactBodies {
       target.or(name, scalar(example), TypeMatcher.INSTANCE, NullMatcher.INSTANCE);
     } else if (example.isTextual()) {
       target.stringType(name, example.asText());
+    } else if (example.isNumber() && leaf.fractional) {
+      target.and(name, example.numberValue(), TypeMatcher.INSTANCE);
     } else if (example.isNumber()) {
       target.numberType(name, example.numberValue());
     } else if (example.isBoolean()) {
@@ -513,6 +517,8 @@ final class PactBodies {
             target.stringMatcher(ISO_INSTANT, example.asText());
           } else if (example.isTextual()) {
             target.stringType(example.asText());
+          } else if (example.isNumber() && item.fractional) {
+            target.and(example.numberValue(), TypeMatcher.INSTANCE);
           } else if (example.isNumber()) {
             target.numberType(example.numberValue());
           } else if (example.isBoolean()) {
@@ -551,6 +557,12 @@ final class PactBodies {
     }
     if (example.isTextual()) {
       return PactDslJsonRootValue.stringType(example.asText());
+    }
+    if (example.isNumber() && leaf.fractional) {
+      PactDslJsonRootValue value = new PactDslJsonRootValue();
+      value.setValue(example.numberValue());
+      value.setMatcher(TypeMatcher.INSTANCE);
+      return value;
     }
     if (example.isNumber()) {
       return PactDslJsonRootValue.numberType(example.numberValue());
@@ -690,6 +702,12 @@ final class PactBodies {
     final List<Shape> items = new ArrayList<>();
     /** Whether an array's elements merge into one template at all (no OBJECT beside a LEAF). */
     boolean mergeable = true;
+    /**
+     * A number recorded with a fraction or an exponent, in any merged element: a type match, as
+     * pact-jvm's {@code number} and {@code decimal} refuse an answer in exponent form ({@code 1.5E8},
+     * a BigDecimal of negative scale) however correct its JSON.
+     */
+    boolean fractional;
 
     static Shape of(JsonNode node) {
       Shape shape = new Shape();
@@ -717,6 +735,7 @@ final class PactBodies {
       } else {
         shape.kind = Kind.LEAF;
         shape.example = node;
+        shape.fractional = node.isFloatingPointNumber();
       }
       return shape;
     }
@@ -737,6 +756,7 @@ final class PactBodies {
       }
       a.nullable |= b.nullable;
       a.absent |= b.absent;
+      a.fractional |= b.fractional;
       switch (a.kind) {
         case OBJECT -> {
           List<String> keys = new ArrayList<>(a.fields.keySet());

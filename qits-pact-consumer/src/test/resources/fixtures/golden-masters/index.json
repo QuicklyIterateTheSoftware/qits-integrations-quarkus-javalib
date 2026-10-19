@@ -154,6 +154,22 @@
           }
         }
       ]
+    },
+    {
+      "name": "a gauge",
+      "slug": "a-gauge",
+      "params": {},
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listGauges",
+          "method": "GET",
+          "path": "/fixture/api/gauges",
+          "status": 200,
+          "file": "a-gauge/listGauges.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        }
+      ]
     }
   ]
 }

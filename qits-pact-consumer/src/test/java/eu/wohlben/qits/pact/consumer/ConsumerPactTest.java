@@ -326,6 +326,37 @@ class ConsumerPactTest {
     assertTrue(refused.contains("Expected 1 (Integer) to be the same type as 'x'"), refused);
   }
 
+  /**
+   * A gauge recorded as {@code 1.5E8}: pact-jvm's {@code number} (and {@code decimal}) refuse a
+   * number in exponent form, as its BigDecimal has a negative scale. A number recorded with a
+   * fraction or an exponent, in any element, is a type match; an integer keeps {@code number}.
+   */
+  @Test
+  void aNumberInExponentFormVerifiesWhateverItsNotation() {
+    var row = GoldenInteraction.of(Trigger.operation("showGauges"), "a gauge", "listGauges")
+        .consumes("gauges[].value", "peak", "ratio", "count", "samples", "parts");
+    var expected = ConsumerPact.of(CONSUMER, FIXTURE, row).pact(List.of(row))
+        .getInteractions().get(0).asSynchronousRequestResponse().getResponse();
+    for (String value : List.of("1.5E8", "2.5E-3", "1E10", "150000000", "0.25", "7")) {
+      String body = """
+          {"gauges": [{"value": %1$s}, {"value": %1$s}], "peak": %1$s, "ratio": %1$s, "count": 3,
+           "samples": [%1$s, %1$s], "parts": [%1$s, {"name": "heap"}]}""".formatted(value);
+      var mismatches = ResponseMatching.responseMismatches(expected, answer(body));
+      assertTrue(mismatches.isEmpty(), value + " -> " + mismatches.stream().map(Mismatch::description).toList());
+    }
+    String refused = ResponseMatching.responseMismatches(expected, answer("""
+        {"gauges": [{"value": "1.5E8"}, {"value": 1}], "peak": 1, "ratio": 1, "count": 3,
+         "samples": [1, 1], "parts": [1, {"name": "heap"}]}"""))
+        .stream().map(Mismatch::description).toList().toString();
+    assertTrue(refused.contains("'1.5E8' (String) to be the same type as"), refused);
+
+    JsonNode rules = interaction(row).path("response").path("matchingRules").path("body");
+    for (String path : List.of("$.gauges[*].value", "$.peak", "$.ratio", "$.samples[*]", "$.parts[0]")) {
+      assertEquals("type", rules.path(path).path("matchers").get(0).path("match").asText(), path + ": " + rules);
+    }
+    assertEquals("number", rules.path("$.count").path("matchers").get(0).path("match").asText(), rules.toString());
+  }
+
   private static HttpResponse answer(String json) {
     return new HttpResponse(200, Map.of("Content-Type", List.of("application/json")),
         OptionalBody.body(json, ContentType.getJSON()));

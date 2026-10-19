@@ -1,0 +1,11 @@
+{
+  "gauges": [
+    { "name": "requests", "value": 2 },
+    { "name": "heap", "value": 1.5E8 }
+  ],
+  "peak": 1.5E8,
+  "ratio": 0.25,
+  "count": 2,
+  "samples": [2, 1.5E8],
+  "parts": [1.5E8, { "name": "heap" }]
+}
