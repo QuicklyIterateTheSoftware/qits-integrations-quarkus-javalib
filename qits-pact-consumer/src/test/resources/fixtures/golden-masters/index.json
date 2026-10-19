@@ -170,6 +170,23 @@
           "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
         }
       ]
+    },
+    {
+      "name": "an event feed",
+      "slug": "an-event-feed",
+      "params": { "projectId": "00000000-0000-4000-8000-000000000031", "repositoryName": "fixture-repo" },
+      "dependsOn": [],
+      "operations": [
+        {
+          "operationId": "listEvents",
+          "method": "GET",
+          "path": "/fixture/api/events",
+          "query": { "attr": ["repositoryname={repositoryName}", "projectid={projectId}"], "limit": "5" },
+          "status": 200,
+          "file": "an-event-feed/listEvents.json",
+          "frozen": { "ids": [], "instants": [], "strings": [], "listFilteredTo": null }
+        }
+      ]
     }
   ]
 }

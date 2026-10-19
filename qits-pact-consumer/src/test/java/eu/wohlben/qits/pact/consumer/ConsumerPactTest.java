@@ -165,6 +165,62 @@ class ConsumerPactTest {
         request.toString());
   }
 
+  /**
+   * {@code attr=repositoryname={repositoryName}&attr=projectid={projectId}}: every value of a
+   * repeated query parameter is the state's example for the mock server and its own provider-state
+   * expression for the verifier, so a provider with fresh ids is asked for its own.
+   */
+  @Test
+  void everyValueOfARepeatedQueryParameterIsAProviderStateExpression(@TempDir Path dir) throws Exception {
+    var row = GoldenInteraction.of(Trigger.command("qits checkout-daemon"), "an event feed", "listEvents")
+        .consumes("[].type");
+    JsonNode request = interaction(row).path("request");
+    assertEquals(List.of("repositoryname=fixture-repo", "projectid=00000000-0000-4000-8000-000000000031"),
+        MAPPER.convertValue(request.path("query").path("attr"), List.class));
+    assertEquals(List.of("5"), MAPPER.convertValue(request.path("query").path("limit"), List.class));
+    JsonNode generators = request.path("generators").path("query");
+    assertEquals("repositoryname=${repositoryName}", generators.path("attr[0]").path("expression").asText(),
+        request.toString());
+    assertEquals("projectid=${projectId}", generators.path("attr[1]").path("expression").asText(),
+        request.toString());
+
+    // the verifier's side, from the written pact as a provider loads it: pact-jvm 4.6.21 generates
+    // the request but leaves both values recorded; RepeatedQuery substitutes each from the state
+    var pact = ConsumerPact.of(CONSUMER, FIXTURE, row);
+    Path file = Files.writeString(dir.resolve("pact.json"), MAPPER.writeValueAsString(pact.normalisedPact(List.of(row))));
+    var interaction = au.com.dius.pact.core.model.DefaultPactReader.INSTANCE.loadPact(file.toFile())
+        .getInteractions().get(0);
+    Map<String, Object> context = Map.of("providerState",
+        Map.of("repositoryName", "other repo", "projectId", "fresh-id"));
+    var generated = interaction.asSynchronousRequestResponse().getRequest()
+        .generatedRequest(context, au.com.dius.pact.core.model.generators.GeneratorTestMode.Provider);
+    assertEquals(List.of("repositoryname=fixture-repo", "projectid=00000000-0000-4000-8000-000000000031"),
+        generated.getQuery().get("attr"));
+    StringBuilder sent = new StringBuilder("http://provider:8080" + generated.getPath() + "?");
+    generated.getQuery().forEach((name, values) -> values.forEach(v -> sent.append(name).append('=')
+        .append(java.net.URLEncoder.encode(v, java.nio.charset.StandardCharsets.UTF_8)).append('&')));
+    URI substituted = RepeatedQuery.generated(URI.create(sent.substring(0, sent.length() - 1)), interaction, context);
+    assertEquals("http://provider:8080/fixture/api/events"
+        + "?attr=repositoryname%3Dother+repo&attr=projectid%3Dfresh-id&limit=5", substituted.toString());
+    URI plain = URI.create("http://provider:8080/fixture/api/things/search?tag=a");
+    var single = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).pact(List.of(GET_THING)).getInteractions().get(0);
+    assertEquals(plain, RepeatedQuery.generated(plain, single, context), "no indexed generator: unchanged");
+
+    // the consumer's side: the mock server takes the examples, both values
+    pact.run(row, (url, recorded) -> {
+      String query = "?attr=" + java.net.URLEncoder.encode("repositoryname=fixture-repo", "UTF-8")
+          + "&attr=" + java.net.URLEncoder.encode("projectid=00000000-0000-4000-8000-000000000031", "UTF-8")
+          + "&limit=5";
+      var answer = HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath() + query)).build(),
+          java.net.http.HttpResponse.BodyHandlers.ofString());
+      assertEquals(200, answer.statusCode());
+    });
+    assertThrows(AssertionError.class, () -> pact.run(row, (url, recorded) ->
+        HTTP.send(HttpRequest.newBuilder(URI.create(url + recorded.examplePath()
+            + "?attr=repositoryname%3Dfixture-repo&attr=projectid%3Dother&limit=5")).build(),
+            java.net.http.HttpResponse.BodyHandlers.ofString())));
+  }
+
   @Test
   void aJsonRequestBodyIsTheRecordedOneWithStateValuesAsExpressions() {
     JsonNode request = interaction(GoldenInteraction.of(Trigger.operation("addThing"), "a thing", "createThing")

@@ -241,6 +241,10 @@ public final class ConsumerPact {
           if (values.size() == 1 && op.hasParam(values.getFirst())) {
             r.queryParameter(name, Matchers.fromProviderState(op.expression(values.getFirst()),
                 op.example(values.getFirst())));
+          } else if (values.stream().anyMatch(op::hasParam)) {
+            // A repeated parameter: each value its own expression, generated at name[index].
+            r.queryParameter(name, values.stream().<Object>map(v -> op.hasParam(v)
+                ? Matchers.fromProviderState(op.expression(v), op.example(v)) : v).toList());
           } else {
             r.queryParameter(name, values.stream().map(op::example).toList());
           }
