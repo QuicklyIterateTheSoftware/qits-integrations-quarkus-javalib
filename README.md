@@ -6,7 +6,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the test-profile budget, and the datasource baseline. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
@@ -311,6 +311,46 @@ call site and both repairs. A service that builds no client passes.
 Types matched **by name**, as everywhere here: no dependency on qits-http-core, and the fixture
 mirror (`eu.wohlben.qits.http.QitsHttpClients`, `RawHttpClient`) in this module's test sources is
 where a rename surfaces.
+
+## DeskAdminParityRules
+
+Guards the parity between `qits:admin-agent` and `qits:desk-admin` (qits-1621): the delivery desk
+reaches every door the admin agent reaches, except the few a service lists as refused because the
+door is the desk's own right or a ref write. Unlike the rules above, both factory methods take the
+service's refusal list, so there is no bare `ArchTests.in(...)`:
+
+```java
+@AnalyzeClasses(packages = "eu.wohlben.qits.<service>.api",
+    importOptions = ImportOption.DoNotIncludeTests.class)
+class DeskAdminParityTest {
+  private static final Set<String> REFUSED = Set.of("ProjectController.create", ...);
+
+  @ArchTest
+  static final ArchRule PARITY = DeskAdminParityRules.everyAdminAgentRouteAdmitsDeskAdmin(REFUSED);
+
+  @ArchTest
+  static final ArchRule REFUSALS = DeskAdminParityRules.refusedRoutesExistAndRefuse(REFUSED);
+}
+```
+
+A **route** is a method annotated with one of jakarta.ws.rs' `GET`, `POST`, `PUT`, `PATCH`,
+`DELETE`, `HEAD`, or one of WebSockets Next's `OnOpen`, `OnTextMessage`, `OnBinaryMessage`. Its
+**effective roles** are its own `@jakarta.annotation.security.RolesAllowed` if it has one,
+otherwise its declaring class's — a method-level `@RolesAllowed` fully replaces the class's rather
+than adding to it, so an override to `qits:admin-agent` alone is judged on that override whatever
+the class grants.
+
+`everyAdminAgentRouteAdmitsDeskAdmin(refused)` fails every route whose effective roles admit
+`qits:admin-agent`, is not named in `refused`, and does not also admit `qits:desk-admin`, with:
+`<Class.method> admits qits:admin-agent but not qits:desk-admin (qits-1621); add the role or list
+it as refused`. `refusedRoutesExistAndRefuse(refused)` is the other half: it fails every entry in
+`refused` that names no route at all (a rename, a removal) or names a route that itself now admits
+`qits:desk-admin` — a stale refusal — naming the entry and why.
+
+Types matched **by name**, as everywhere here: this module carries neither a JAX-RS API nor
+WebSockets Next, so a bare clone builds and the two frameworks' versions stay uncoupled from this
+one's. The fixture mirror in this module's test sources, compiled against the real annotations, is
+where a rename in either would surface.
 
 ## TestProfileBudgetRules
 

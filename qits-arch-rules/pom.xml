@@ -60,6 +60,28 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- For DeskAdminParityRules' FIXTURES only: the self-test routes need real
+                 @GET/@POST/.../@RolesAllowed bytecode to run the rule against. The rule itself
+                 matches jakarta.ws.rs and jakarta.annotation.security by name, never by import,
+                 for the reasons the class javadoc gives. -->
+            <groupId>jakarta.ws.rs</groupId>
+            <artifactId>jakarta.ws.rs-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Same fixture-only reason: @RolesAllowed itself. -->
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Same fixture-only reason: WebSockets Next's @OnOpen/@OnTextMessage/@OnBinaryMessage,
+                 the rule's other kind of route. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-websockets-next</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The config implementation the tests build their fixtures with — Quarkus' own, so
                  what the rule sees here is what it sees in a service. No Quarkus server: this is
                  the config library alone. -->
