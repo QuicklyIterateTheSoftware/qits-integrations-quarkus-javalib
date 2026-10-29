@@ -543,6 +543,7 @@ class ConsumerPactTest {
 
   @Test
   void thePactFileIsWrittenOnRequestAndComparedOtherwise(@TempDir Path dir) throws Exception {
+    assumeCompareMode();
     var waiting = GoldenInteraction.of(Trigger.operation("renameThing"), "a renamed thing", "renameThing");
     ConsumerPact pact = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING, waiting);
     Path file = dir.resolve("qits-fixture-consumer_qits-fixture-service.json");
@@ -561,6 +562,7 @@ class ConsumerPactTest {
   /** A qits-maintenance bump of the via library: the version-only diff refreshes, not fails. */
   @Test
   void aLibraryBumpOnlyRefreshesTheViaVersion(@TempDir Path dir) throws Exception {
+    assumeCompareMode();
     Via oldVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "1.0.0");
     Via newVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "2.0.0");
     ConsumerPact was = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(oldVersion);
@@ -588,6 +590,7 @@ class ConsumerPactTest {
   /** A version bump alongside an unrelated change is still a real diff, and still fails. */
   @Test
   void aRealDiffAlongsideTheVersionStillFails(@TempDir Path dir) throws Exception {
+    assumeCompareMode();
     Via oldVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "1.0.0");
     Via newVersion = new Via("qits-eventstream-javalib", "eu.wohlben.qits:qits-eventstream", "2.0.0");
     ConsumerPact was = ConsumerPact.of(CONSUMER, FIXTURE, GET_THING).via(oldVersion);
@@ -608,6 +611,15 @@ class ConsumerPactTest {
       TestAbortedException skipped = assertThrows(TestAbortedException.class, pact::compareOrWritePactFile);
       assertTrue(skipped.getMessage().contains("needs provider state 'a renamed thing'"), skipped.getMessage());
     });
+  }
+
+  /**
+   * The golden-recordings automation runs every test with the update flag on, where nothing is
+   * compared, so a test that expects a comparison to fail can only run without it.
+   */
+  private static void assumeCompareMode() {
+    org.junit.jupiter.api.Assumptions.assumeFalse(
+        GoldenFiles.updating(), "update mode: nothing is compared");
   }
 
   private static void withProperties(Path dir, boolean update, ThrowingRunnable body) {
