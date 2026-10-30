@@ -6,7 +6,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, and the datasource baseline. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, and provider-state coverage. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
@@ -441,6 +441,40 @@ The driver is named as a **string**, the same trick the ArchUnit rules use: this
 neither qits-db-core nor a datasource, config carries names, and a bare clone builds with no platform
 registry. The MicroProfile config API is a **provided** dependency — every Quarkus consumer already
 has it on its test classpath.
+
+## ProviderStateCoverageRules
+
+Every provider state the golden masters record has its `@State` callback, as a build failure. A
+provider's `golden-masters/index.json` lists every state a consumer can pin, and its pact verifier
+carries one `@State("<name>")` method per state; nothing joined the two, so a recorded state without
+its callback failed nowhere until a consumer pinned a pact naming it — and then the provider's gate
+went red with `Provider state change callback failed`. A plain JUnit test:
+
+```java
+class ProviderStateCoverageTest {
+  @Test
+  void everyRecordedStateHasItsCallback() {
+    ProviderStateCoverageRules.assertCovered(ConsumerPactVerificationTest.class);
+  }
+}
+```
+
+The index is found by walking up from the working directory, so a multi-module provider with
+`golden-masters/` at its repository root needs nothing more. Both directions are checked and every
+problem is reported at once: a recorded state no `@State` lists (naming the verifiers searched), and
+a `@State` name the index does not record. Pass several verifiers — `ConsumerPactVerificationTest`
+and `GatedConsumerPactVerificationTest` — and their callbacks count as one set; one `@State({"a",
+"b"})` covers both names.
+
+`assertCovered(Path goldenIndex, Set<String> unrecordedAliases, Class<?>... verifiers)` names the
+index explicitly and declares callbacks kept on purpose for a name the index does not record. An
+alias goes stale like anything else: one the index now records, or one no `@State` lists, fails too.
+
+`@State` is matched **by name** and its `value()` invoked reflectively, so this module carries no
+pact-jvm and the fleet's pact version stays its own; the fixture mirror of
+`au.com.dius.pact.provider.junitsupport.State` in this module's test sources is where a pact-jvm
+rename would surface. The index is parsed with Jackson, a **provided** dependency every Quarkus
+consumer already has on its test classpath.
 
 ---
 
