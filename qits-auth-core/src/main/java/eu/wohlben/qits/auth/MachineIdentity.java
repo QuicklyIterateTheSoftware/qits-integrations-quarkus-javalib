@@ -37,29 +37,25 @@ public final class MachineIdentity {
 
   /**
    * True when the token is addressed to the platform — {@code qits.auth.machine.platform-audience}
-   * (rulings 2026-09-13: one audience for the whole platform) — or to {@code audience}, an extra
-   * value the caller will accept as well. The platform audience is read here through {@link
-   * ConfigProvider} rather than taken as a parameter, so the everyday call site names only what it
-   * has in hand. Use the three-argument overload to pass a known platform audience instead, such as
+   * (rulings 2026-09-13: one audience for the whole platform). The platform audience is read here
+   * through {@link ConfigProvider} rather than taken as a parameter, so the everyday call site
+   * names nothing. Use the two-argument overload to pass a known platform audience instead, such as
    * one already read through CDI.
    */
-  public static boolean hasAudience(SecurityIdentity identity, String audience) {
-    return hasAudience(identity, audience, platformAudienceFromConfig());
+  public static boolean hasAudience(SecurityIdentity identity) {
+    return hasAudience(identity, platformAudienceFromConfig());
   }
 
   /**
-   * The same check as {@link #hasAudience(SecurityIdentity, String)}, with the platform audience
-   * given rather than read from config. A blank or {@code null} {@code platformAudience} leaves
-   * only {@code audience} to match, which is how a caller asks about one named audience and nothing
-   * else.
+   * The same check as {@link #hasAudience(SecurityIdentity)}, with the platform audience given
+   * rather than read from config. Package-private: a consuming service always has the audience
+   * fixed by config, so only a test — one that wants to vary it without touching config — needs
+   * this overload.
    */
-  public static boolean hasAudience(
-      SecurityIdentity identity, String audience, String platformAudience) {
-    Set<String> aud = audiences(identity);
-    if (aud.contains(audience)) {
-      return true;
-    }
-    return platformAudience != null && !platformAudience.isBlank() && aud.contains(platformAudience);
+  static boolean hasAudience(SecurityIdentity identity, String platformAudience) {
+    return platformAudience != null
+        && !platformAudience.isBlank()
+        && audiences(identity).contains(platformAudience);
   }
 
   private static String platformAudienceFromConfig() {
@@ -100,33 +96,24 @@ public final class MachineIdentity {
   }
 
   /**
-   * Shorthand for the common check: right audience and right {@code project}. "Right audience"
-   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
-   * String)}.
+   * Shorthand for the common check: platform audience and right {@code project}.
    */
-  public static boolean matchesProject(
-      SecurityIdentity identity, String audience, String project) {
-    return hasAudience(identity, audience) && claimMatches(identity, QitsClaims.PROJECT, project);
+  public static boolean matchesProject(SecurityIdentity identity, String project) {
+    return hasAudience(identity) && claimMatches(identity, QitsClaims.PROJECT, project);
   }
 
   /**
-   * Shorthand for the common check: right audience and right {@code workspace}. "Right audience"
-   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
-   * String)}.
+   * Shorthand for the common check: platform audience and right {@code workspace}.
    */
-  public static boolean matchesWorkspace(
-      SecurityIdentity identity, String audience, String workspace) {
-    return hasAudience(identity, audience)
-        && claimMatches(identity, QitsClaims.WORKSPACE, workspace);
+  public static boolean matchesWorkspace(SecurityIdentity identity, String workspace) {
+    return hasAudience(identity) && claimMatches(identity, QitsClaims.WORKSPACE, workspace);
   }
 
   /**
-   * Shorthand for the common check: right audience and right {@code branch}. "Right audience"
-   * also accepts the shared platform audience, through {@link #hasAudience(SecurityIdentity,
-   * String)}.
+   * Shorthand for the common check: platform audience and right {@code branch}.
    */
-  public static boolean matchesBranch(SecurityIdentity identity, String audience, String branch) {
-    return hasAudience(identity, audience) && claimMatches(identity, QitsClaims.BRANCH, branch);
+  public static boolean matchesBranch(SecurityIdentity identity, String branch) {
+    return hasAudience(identity) && claimMatches(identity, QitsClaims.BRANCH, branch);
   }
 
   private static JsonWebToken token(SecurityIdentity identity) {

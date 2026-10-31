@@ -14,7 +14,8 @@ class MachineIdentityTest {
   /** The one audience every token on the platform carries. */
   private static final String PLATFORM = "qits-platform";
 
-  // Service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  // Service ids carry their environment, so they are spelled here rather than in QitsClaims. They
+  // name clients, never audiences: the platform mints one audience, not one per service.
   private static final String CI = "prod-qits-ci";
   private static final String ARTIFACTS = "prod-qits-artifacts";
   private static final String WORKSPACES = "prod-qits-workspaces";
@@ -28,34 +29,38 @@ class MachineIdentityTest {
   }
 
   @Test
-  void anExtraAudienceIsMatchedExactly() {
-    SecurityIdentity identity = TestTokens.machine(CI, WORKSPACES).build();
-
-    assertTrue(MachineIdentity.hasAudience(identity, WORKSPACES));
-    assertFalse(MachineIdentity.hasAudience(identity, ARTIFACTS));
-    assertFalse(MachineIdentity.hasAudience(TestTokens.user("alice"), WORKSPACES));
-  }
-
-  @Test
   void hasAudienceAcceptsThePlatformAudience() {
-    // The two-argument overload reads qits.auth.machine.platform-audience off config; this
+    // The one-argument overload reads qits.auth.machine.platform-audience off config; this
     // module's shipped default is "qits-platform", the one audience every token carries.
-    SecurityIdentity platformOnly = TestTokens.machine(CI, PLATFORM).build();
+    SecurityIdentity identity = TestTokens.machine(CI, PLATFORM).build();
 
-    assertTrue(MachineIdentity.hasAudience(platformOnly, WORKSPACES));
-    assertTrue(MachineIdentity.matchesProject(
-        TestTokens.machine(CI, PLATFORM).claim(QitsClaims.PROJECT, "qits").build(),
-        WORKSPACES,
-        "qits"));
+    assertTrue(MachineIdentity.hasAudience(identity));
   }
 
   @Test
-  void hasAudienceWithABlankPlatformAudienceLeavesOnlyTheNamedOne() {
-    SecurityIdentity platformOnly = TestTokens.machine(CI, PLATFORM).build();
+  void anyOtherAudienceAloneIsRefused() {
+    // A token addressed only to a service's own (retired) id does not carry the platform
+    // audience, so the check refuses it just as it refuses no audience at all.
+    assertFalse(MachineIdentity.hasAudience(TestTokens.machine(CI, WORKSPACES).build()));
+    assertFalse(MachineIdentity.hasAudience(TestTokens.machine(CI, ARTIFACTS).build()));
+    assertFalse(MachineIdentity.hasAudience(TestTokens.machine(CI).build()));
+    assertFalse(MachineIdentity.hasAudience(TestTokens.user("alice")));
+  }
 
-    assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, ""));
-    assertFalse(MachineIdentity.hasAudience(platformOnly, WORKSPACES, null));
-    assertTrue(MachineIdentity.hasAudience(platformOnly, PLATFORM, ""));
+  @Test
+  void theTwoArgumentOverloadTakesAnInjectedPlatformAudience() {
+    SecurityIdentity identity = TestTokens.machine(CI, PLATFORM).build();
+
+    assertTrue(MachineIdentity.hasAudience(identity, PLATFORM));
+    assertFalse(MachineIdentity.hasAudience(identity, "qits-other"));
+  }
+
+  @Test
+  void aBlankOrNullPlatformAudienceNamesNothingATokenCouldCarry() {
+    SecurityIdentity identity = TestTokens.machine(CI, PLATFORM).build();
+
+    assertFalse(MachineIdentity.hasAudience(identity, ""));
+    assertFalse(MachineIdentity.hasAudience(identity, null));
   }
 
   @Test
@@ -88,17 +93,15 @@ class MachineIdentityTest {
   @Test
   void aWildcardClaimCoversEveryValue() {
     SecurityIdentity everyProject =
-        TestTokens.machine(ARTIFACTS, CI)
+        TestTokens.machine(ARTIFACTS, PLATFORM)
             .claim(QitsClaims.PROJECT, QitsClaims.ANY)
             .build();
 
     assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "qits"));
     assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "anything-else"));
-    assertTrue(MachineIdentity.matchesProject(everyProject, CI, "qits"));
+    assertTrue(MachineIdentity.matchesProject(everyProject, "qits"));
     // The wildcard is on the claim it was granted for, not on the others.
     assertFalse(MachineIdentity.claimMatches(everyProject, QitsClaims.WORKSPACE, "ws-1"));
-    // Still the wrong service.
-    assertFalse(MachineIdentity.matchesProject(everyProject, WORKSPACES, "qits"));
   }
 
   @Test
@@ -112,17 +115,20 @@ class MachineIdentityTest {
   }
 
   @Test
-  void theShorthandsWantBothTheAudienceAndTheClaim() {
+  void theShorthandsWantBothThePlatformAudienceAndTheClaim() {
     SecurityIdentity identity =
-        TestTokens.machine(WORKSPACES, ARTIFACTS)
+        TestTokens.machine(WORKSPACES, PLATFORM)
             .claim(QitsClaims.WORKSPACE, "ws-1")
             .claim(QitsClaims.BRANCH, "feature/x")
             .build();
 
-    assertTrue(MachineIdentity.matchesWorkspace(identity, ARTIFACTS, "ws-1"));
-    assertTrue(MachineIdentity.matchesBranch(identity, ARTIFACTS, "feature/x"));
-    // Right claim, wrong service: a token minted for artifacts says nothing to qits-ci.
-    assertFalse(MachineIdentity.matchesWorkspace(identity, CI, "ws-1"));
-    assertFalse(MachineIdentity.matchesProject(identity, ARTIFACTS, "ws-1"));
+    assertTrue(MachineIdentity.matchesWorkspace(identity, "ws-1"));
+    assertTrue(MachineIdentity.matchesBranch(identity, "feature/x"));
+    // Right claim, but no platform audience: a token addressed only to the service's own
+    // (retired) id says nothing.
+    SecurityIdentity noPlatformAudience =
+        TestTokens.machine(WORKSPACES, WORKSPACES).claim(QitsClaims.WORKSPACE, "ws-1").build();
+    assertFalse(MachineIdentity.matchesWorkspace(noPlatformAudience, "ws-1"));
+    assertFalse(MachineIdentity.matchesProject(identity, "ws-1"));
   }
 }

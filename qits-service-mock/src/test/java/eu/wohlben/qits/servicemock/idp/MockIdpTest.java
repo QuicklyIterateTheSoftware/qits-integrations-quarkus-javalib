@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
 class MockIdpTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final String AUDIENCE = "dev-qits-githost";
+  private static final String AUDIENCE = "qits-platform";
 
   private static MockIdp idp;
 
