@@ -39,6 +39,13 @@
             <artifactId>jakarta.annotation-api</artifactId>
         </dependency>
         <dependency>
+            <!-- The logging API every Quarkus application already holds, as in qits-db-core: a
+                 retried call says so once, and a retry that says nothing is a service that went
+                 quiet for thirty seconds with no record of why. -->
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+        </dependency>
+        <dependency>
             <!-- ConfigProvider, for the caller's name. The implementation is the consuming app's
                  smallrye-config, exactly as in qits-environment-core. -->
             <groupId>org.eclipse.microprofile.config</groupId>
@@ -80,6 +87,13 @@
                  actually ended, and on the traceparent the real W3C propagator wrote. -->
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- A real JAX-RS client — the one the Quarkus REST client is built on — for
+                 RetryClientFilter's wire tests, standalone with no Quarkus boot. -->
+            <groupId>io.quarkus.resteasy.reactive</groupId>
+            <artifactId>resteasy-reactive-client</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

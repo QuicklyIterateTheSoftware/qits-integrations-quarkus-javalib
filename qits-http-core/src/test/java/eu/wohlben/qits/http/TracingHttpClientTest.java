@@ -173,11 +173,13 @@ class TracingHttpClientTest {
   void aFailedExchangeRecordsTheExceptionAndRethrows() throws Exception {
     int closed = server.getAddress().getPort();
     server.stop(0);
+    // One attempt: this is the span's account of a failure; the retry is RetryingHttpClientTest's.
+    HttpClient once = QitsHttpClients.wrap(raw, otel, "qits-ci", RetryPolicy.none());
 
     assertThrows(
         IOException.class,
         () ->
-            client.send(
+            once.send(
                 HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + closed + "/")).build(),
                 HttpResponse.BodyHandlers.discarding()));
 

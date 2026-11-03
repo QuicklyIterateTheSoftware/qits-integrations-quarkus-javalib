@@ -71,6 +71,8 @@ class CallerFiltersTest {
     Config config = config(Map.of(CallerHeader.SERVICE_NAME, "qits-ci"));
     ConfigProviderResolver resolver = ConfigProviderResolver.instance();
     ClassLoader loader = Thread.currentThread().getContextClassLoader();
+    // A JAX-RS client elsewhere in this JVM (RetryClientFilterTest) may have made the default one.
+    resolver.releaseConfig(resolver.getConfig(loader));
     resolver.registerConfig(config, loader);
     try {
       MultivaluedMap<String, Object> plain = new MultivaluedHashMap<>();

@@ -804,6 +804,9 @@ hours, measured live — and the trace cannot say whose request it was. This mod
 - **`CallerHeader`** is the constants and the value: `quarkus.otel.service.name`, falling back to
   `quarkus.application.name` — the caller's deployed identity, identical to its spans'
   `service.name`. A process with neither stamps nothing.
+- **`RetryPolicy`** rides out an edge switchover — see [Retry](#retry) below. Every client
+  `QitsHttpClients.wrap` builds applies it, and **`RetryClientFilter`** applies its status half to
+  every REST client.
 - **`@RawHttpClient(reason = …)`** is the written opt-out for a class that must keep an unwrapped
   client — calls to external hosts, which have no business receiving the platform's trace ids, and
   transports such as an OTLP exporter that must not trace themselves.
@@ -812,9 +815,9 @@ The header sits in the edge's reserved `X-Qits-*` namespace, so qits-platform-ed
 client-supplied copy. **It is diagnostic, not authentication**: nothing may authorize on it, and
 `X-Qits-User` stays the principal.
 
-API jars (JAX-RS, annotation, MP-config, OpenTelemetry API; CDI API provided), the filters and the
-bean discovered through the jandex index, plus one extension: `quarkus-vertx-http`, compile scope as
-in qits-auth-core. ArC registers CallerRouteRecorder's Router observer in every consumer, so a module
+API jars (JAX-RS, annotation, MP-config, OpenTelemetry API, jboss-logging; CDI API provided), the
+filters and the bean discovered through the jandex index, plus one extension: `quarkus-vertx-http`,
+compile scope as in qits-auth-core. ArC registers CallerRouteRecorder's Router observer in every consumer, so a module
 without an HTTP server of its own fails to boot when the Router class is missing.
 
 ## Adoption
@@ -844,6 +847,52 @@ class GithubClient { … }
 
 `QitsHttpClients.wrap(raw, openTelemetry, caller)` is the same wrapper without CDI. qits-arch-rules'
 `HttpClientRules` holds a service to all of this — see there.
+
+## Retry
+
+Services call each other through the public edge. The edge updates start-first, but the routing
+mesh can drop a connection when the old task stops, and a not-yet-ready edge answers `503` with
+`Retry-After: 1`. `RetryPolicy` is the one answer to both: patience for a switchover, a clear
+failure for anything longer.
+
+| | Retried for | |
+| --- | --- | --- |
+| Connection refused, connect timeout, TLS handshake failure | **every method** | Nothing reached the peer, so a second attempt cannot be a second effect. |
+| Reset, broken pipe, EOF before a response | `GET` `HEAD` `PUT` `DELETE` | The request may have arrived; only an idempotent method survives a resend. |
+| `502`, `503`, `504` **with** `Retry-After` | `GET` `HEAD` `PUT` `DELETE` | The header is what makes it a switchover. `POST` and `PATCH` are never resent once a response arrived. |
+| Unresolvable host, request timeout, any other status, a `503` without `Retry-After` | never | A DNS failure is a wrong name, not a rollover; a bare `503` is an application's answer. |
+
+**Timing.** 250 ms, doubling, within **30 s** from the first attempt. A `Retry-After` in seconds
+raises a pause to at least that long; one that points past the remaining budget ends the retries at
+once. A pause is cut to the budget left, no attempt starts after it, and then the **last error is
+raised, or the last response returned**, unchanged. `qits.http.retry.budget` (`PT10S`, `10s`,
+`500ms`, `0` for off) overrides the budget for the CDI bean and the filter;
+`QitsHttpClients.of(otel, caller, RetryPolicy.none())` and `wrap(raw, otel, caller, policy)` take
+one explicitly — a test that points a client at a closed port wants `none()` rather than thirty
+seconds. The clock and the pauses are `RetryPolicy.Timing`, so tests run the budget in virtual time.
+
+**Never retried at all**: a body that cannot be sent twice (for `java.net.http`, anything but the
+JDK's empty, byte-array, string and file publishers; for the REST client, streams, readers,
+publishers, multipart) and any request that opens an event stream — SSE reconnection belongs to
+its subscriber.
+
+**Logging.** One WARN per call that needed a second attempt, when it is over — `GET
+qits-ci.qits.example got through after 3 attempts in 1250 ms (retry budget 30000 ms): HTTP 200`, or
+`gave up` with the last status or exception. Each attempt is DEBUG. In the trace every attempt is its
+own CLIENT span, a resend carrying `http.request.resend_count`.
+
+**The REST client gets the status half only.** `RetryClientFilter` is a `@Provider`
+`ClientResponseFilter`, registered the way `CallerClientFilter` is, so every REST client in a
+consuming service picks it up with no per-client code. On a switchover answer it sends the same
+request again through the same configured client (its TLS, timeouts and providers) and puts the
+final status, headers and body where the caller reads the first. It does **not** retry a REST
+client's connection failure: the Quarkus REST client has no public retry hook, and a filter cannot
+recover an exchange whose transport failed — the throwable is already recorded in the client's
+internal request context. MicroProfile Fault Tolerance `@Retry` is per interface, and rewriting every
+interface would take an extension, which this module is not. A REST call that must survive a refused
+connection wraps itself in `RetryPolicy.execute(…)`, or moves to a wrapped `HttpClient`. The filter
+also stands aside when response filters run on an I/O thread, where waiting would block the event
+loop; under Quarkus they run on a worker.
 
 ---
 

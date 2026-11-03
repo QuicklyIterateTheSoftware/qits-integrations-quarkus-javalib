@@ -20,6 +20,11 @@ import java.net.http.HttpClient;
  *     .build());
  * }</pre>
  *
+ * <p>Every wrapped client also retries an edge switchover under {@link RetryPolicy}: connection
+ * failures before the request was sent, resets and {@code 502}/{@code 503}/{@code 504} with {@code
+ * Retry-After} for idempotent methods, 250 ms doubling within 30 s. The bean takes the budget from
+ * {@value RetryPolicy#BUDGET_PROPERTY}.
+ *
  * <p>The OpenTelemetry is whatever the application produces: the SDK under quarkus-opentelemetry,
  * Quarkus' own no-op when the SDK is disabled, and {@link OpenTelemetry#noop()} when nothing
  * produces one at all — in which case the wrapper still stamps the caller and simply records
@@ -35,6 +40,7 @@ public class QitsHttpClients {
 
   private final OpenTelemetry openTelemetry;
   private final String caller;
+  private final RetryPolicy retry;
 
   /**
    * For the client proxy ArC puts in front of a normal-scoped bean, and for nothing else: the
@@ -43,6 +49,7 @@ public class QitsHttpClients {
   QitsHttpClients() {
     this.openTelemetry = null;
     this.caller = null;
+    this.retry = null;
   }
 
   @Inject
@@ -50,11 +57,13 @@ public class QitsHttpClients {
     this.openTelemetry =
         openTelemetry.isResolvable() ? openTelemetry.get() : OpenTelemetry.noop();
     this.caller = CallerHeader.value().orElse(null);
+    this.retry = RetryPolicy.fromConfig();
   }
 
-  private QitsHttpClients(OpenTelemetry openTelemetry, String caller) {
+  private QitsHttpClients(OpenTelemetry openTelemetry, String caller, RetryPolicy retry) {
     this.openTelemetry = openTelemetry;
     this.caller = caller;
+    this.retry = retry;
   }
 
   /**
@@ -63,12 +72,23 @@ public class QitsHttpClients {
    * null)} is the inert one: no span, no header, the raw client's behaviour exactly.
    */
   public static QitsHttpClients of(OpenTelemetry openTelemetry, String caller) {
-    return new QitsHttpClients(openTelemetry, caller);
+    return of(openTelemetry, caller, RetryPolicy.standard());
   }
 
-  /** The traced, caller-stamped view of {@code raw}, sharing its pool, executor and lifecycle. */
+  /**
+   * A hand-built bean with its own retry policy — {@link RetryPolicy#none()} for a test that
+   * points a client at a closed port and wants the refusal now rather than in thirty seconds.
+   */
+  public static QitsHttpClients of(OpenTelemetry openTelemetry, String caller, RetryPolicy retry) {
+    return new QitsHttpClients(openTelemetry, caller, retry);
+  }
+
+  /**
+   * The traced, caller-stamped, switchover-patient view of {@code raw}, sharing its pool, executor
+   * and lifecycle.
+   */
   public HttpClient wrap(HttpClient raw) {
-    return wrap(raw, openTelemetry, caller);
+    return wrap(raw, openTelemetry, caller, retry);
   }
 
   /**
@@ -76,9 +96,15 @@ public class QitsHttpClients {
    * test, or a class built before the container is. A {@code null} caller stamps no header.
    */
   public static HttpClient wrap(HttpClient raw, OpenTelemetry openTelemetry, String caller) {
+    return wrap(raw, openTelemetry, caller, RetryPolicy.standard());
+  }
+
+  /** The same, with an explicit {@link RetryPolicy}. */
+  public static HttpClient wrap(
+      HttpClient raw, OpenTelemetry openTelemetry, String caller, RetryPolicy retry) {
     if (raw instanceof TracingHttpClient) {
       return raw;
     }
-    return new TracingHttpClient(raw, openTelemetry, caller);
+    return new TracingHttpClient(raw, openTelemetry, caller, retry);
   }
 }
