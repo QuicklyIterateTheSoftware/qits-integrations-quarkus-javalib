@@ -1,9 +1,9 @@
 package eu.wohlben.qits.telemetry;
 
 import io.opentelemetry.common.ComponentLoader;
-import io.opentelemetry.exporter.internal.http.HttpSenderProvider;
 import io.opentelemetry.exporter.sender.jdk.internal.JdkHttpSenderProvider;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The SPI loader handed to the upstream builders: the java.net.http sender, named rather than
@@ -24,12 +24,22 @@ final class JdkSenderLoader implements ComponentLoader {
 
   static final JdkSenderLoader INSTANCE = new JdkSenderLoader();
 
+  /**
+   * The SPI's name before and after OpenTelemetry moved it out of the internal package ({@code
+   * exporter.internal.http} up to 1.57, {@code sdk.common.export} by 1.62). Named, never
+   * referenced, so one jar links against both: Quarkus 3.34.6 and 3.40.1 consumers alike.
+   */
+  private static final Set<String> HTTP_SENDER_PROVIDER =
+      Set.of(
+          "io.opentelemetry.exporter.internal.http.HttpSenderProvider",
+          "io.opentelemetry.sdk.common.export.HttpSenderProvider");
+
   private JdkSenderLoader() {}
 
   @Override
   @SuppressWarnings("unchecked")
   public <T> Iterable<T> load(Class<T> spiClass) {
-    if (spiClass == HttpSenderProvider.class) {
+    if (HTTP_SENDER_PROVIDER.contains(spiClass.getName())) {
       return (Iterable<T>) List.of(new JdkHttpSenderProvider());
     }
     return List.of();
