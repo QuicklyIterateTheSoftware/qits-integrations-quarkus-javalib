@@ -1,7 +1,7 @@
 # qits-integrations-quarkus-javalib
 
 Quarkus glue every qits service needs and no service owns. The reactor is
-`eu.wohlben.qits:qits-integrations-quarkus`, with seven modules today:
+`eu.wohlben.qits:qits-integrations-quarkus`, with eight modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
+| `qits-telemetry-core/` | `eu.wohlben.qits:qits-telemetry-core` | Telemetry export that carries a bearer: CDI `SpanExporter`/`LogRecordExporter`/`MetricExporter` beans on the upstream OTLP/HTTP builders, whose header supplier attaches the `qits` oidc client's current token on every export. |
 | `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
 | `qits-pact-consumer/` | `eu.wohlben.qits:qits-pact-consumer` | The consumer half of the contracts: reads providers' golden masters off the test classpath and turns a (provider state, operation) into a pact row that binds only what the consumer reads. Test scope for consumers. |
 
@@ -897,6 +898,172 @@ interface would take an extension, which this module is not. A REST call that mu
 connection wraps itself in `RetryPolicy.execute(…)`, or moves to a wrapped `HttpClient`. The filter
 also stands aside when response filters run on an I/O thread, where waiting would block the event
 loop; under Quarkus they run on a worker.
+
+---
+
+# qits-telemetry-core
+
+## What it is
+
+Telemetry export that carries a bearer (epic qits-428). Every service ships its spans, logs and
+metrics to qits-observability's OTLP/HTTP receiver. Through the public edge, a POST to a service
+vhost needs a bearer, and Quarkus' own OTLP exporter takes only **static** headers while a bearer
+expires. This module swaps out all three exporters for CDI beans built with OpenTelemetry's upstream
+`OtlpHttpSpanExporter` / `OtlpHttpLogRecordExporter` / `OtlpHttpMetricExporter` builders. Their
+`setHeaders(Supplier<Map<String,String>>)` is asked on **every** export request, and answers
+`Authorization: Bearer <current token>` from the named oidc client `quarkus.oidc-client.qits`, the
+same client and the same `TokensHelper` cache-and-refresh as qits-maintenance's `PeerTokens` and
+qits-docs' `DocsBearer`.
+
+| Class | |
+| --- | --- |
+| `TelemetryExporters` | The three `@Produces @Singleton @Unremovable` exporters. |
+| `BearerHeaders` | The header supplier the three share. |
+| `OidcBearerSource` | The token: `OidcClients.getClient(<name>)` + `TokensHelper`, bounded wait. |
+| `TelemetrySettings` | The `qits.telemetry.*` keys, read when the SDK builds the exporters. |
+| `JdkSenderLoader` | Hands the builders the java.net.http sender by name (see Native). |
+
+## Adoption
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-telemetry-core</artifactId>
+    <version>…</version>
+</dependency>
+```
+
+It brings `quarkus-opentelemetry`, `quarkus-oidc-client` and `opentelemetry-exporter-sender-jdk`,
+with versions from the service's own Quarkus BOM. A service that already has the first two gains
+only the sender jar.
+
+```properties
+# The receiver at its edge host is the module's default; set it only to point somewhere else.
+# qits.telemetry.endpoint=https://observability.qits.${QITS_DOMAIN}/observability/api/otel
+
+# The three signals, through the CDI exporters. `cdi` is Quarkus' default for all three. They are
+# spelled out like the estate's logs keys, so that a changed default shows up as a diff.
+quarkus.otel.traces.exporter=cdi
+quarkus.otel.logs.enabled=true
+quarkus.otel.logs.exporter=cdi
+quarkus.otel.metrics.enabled=true
+quarkus.otel.metrics.exporter=cdi
+
+# The `qits` oidc client, as every peer-calling service already configures it. A service without
+# one adds the block (qits-docs' application.properties is the template):
+quarkus.oidc-client.qits.auth-server-url=${QITS_RESOURCE_IDP_URL:https://idp.qits.${QITS_DOMAIN}/idp}
+quarkus.oidc-client.qits.discovery-enabled=false
+quarkus.oidc-client.qits.token-path=token
+quarkus.oidc-client.qits.client-id=${QITS_RESOURCE_IDP_CLIENT_ID:dev-<app>}
+quarkus.oidc-client.qits.credentials.secret=${QITS_RESOURCE_IDP_CLIENT_SECRET:}
+quarkus.oidc-client.qits.grant.type=client
+quarkus.oidc-client.qits.grant-options.client.audience=qits-platform
+quarkus.oidc-client.qits.early-tokens-acquisition=false
+quarkus.oidc-client.qits.client-enabled=true
+%dev.quarkus.oidc-client.qits.client-enabled=false
+%test.quarkus.oidc-client.qits.client-enabled=false
+```
+
+**Delete** `qits.observability.url`, `quarkus.otel.exporter.otlp.endpoint` and
+`quarkus.otel.exporter.otlp.protocol`. Once this jar is on the classpath, none of Quarkus' own OTLP
+exporters is ever built, so those keys reach nothing, and leaving them in suggests they still do.
+Keep `%dev`/`%test.quarkus.otel.sdk.disabled=true`: with the SDK off the exporters are never built,
+so those profiles need neither `QITS_DOMAIN` nor an oidc client.
+
+A service whose `quarkus.otel.traces.suppress-application-uris` names the ingest paths (qits-docs)
+can keep it. It only matters to a service that receives its own exports.
+
+## How Quarkus picks each signal up
+
+Read from Quarkus 3.34.6's bytecode (`OtlpExporterProcessor`, `OTelExporterRecorder`, the
+`*ExporterCDIProvider`s):
+
+| Signal | Mechanism |
+| --- | --- |
+| traces | `quarkus.otel.traces.exporter=cdi` → the SDK autoconfigure calls `SpanExporterCDIProvider`, which composes **every** `SpanExporter` bean, inside a `BatchSpanProcessor` (`quarkus.otel.bsp.*`). Quarkus' own `LateBoundSpanProcessor` is still created, finds a `SpanExporter` bean present and stands down as the removable no-op, so each span is exported once. |
+| logs | `quarkus.otel.logs.exporter=cdi` → `OtlpExporterProcessor` creates its own `LogRecordExporter` **only if bean discovery found none**. This module's producer is one, so Quarkus' is never made, and `LogsExporterCDIProvider` returns this bean (`quarkus.otel.blrp.*`). |
+| metrics | Same rule as logs, through `MetricsExporterCDIProvider` (`quarkus.otel.metric.export.interval`). Cumulative temporality, the same default as Quarkus' exporter. |
+
+So a second `LogRecordExporter` or `MetricExporter` bean in a service would be ambiguous
+(`Instance.get()`), and a second `SpanExporter` would also export. This module must be the only one.
+
+## Config
+
+| Key | Default | |
+| --- | --- | --- |
+| `qits.telemetry.endpoint` | `https://observability.qits.${QITS_DOMAIN}/observability/api/otel` | The OTLP base. `/v1/traces`, `/v1/logs` and `/v1/metrics` are appended, which are `OtelReceiverResource`'s routes. |
+| `qits.telemetry.bearer.enabled` | `true` | `false` is the opt-out: no Authorization header, and the oidc client is never touched. |
+| `qits.telemetry.bearer.client` | `qits` | Which `quarkus.oidc-client.<name>` mints the token. |
+| `qits.telemetry.bearer.timeout` | `5S` | The longest one export waits for a token that is not cached. A cached token answers at once. |
+| `qits.telemetry.timeout` | `10S` | The export request's timeout. |
+| `qits.telemetry.compression` | `none` | `none` or `gzip`. The receiver accepts both. |
+
+## The opt-out
+
+There are two services that must not send a bearer. qits-observability exports to itself on
+localhost, and qits-edge has to stay internal (exception E1). Each one keeps the endpoint it
+exports to today and turns the bearer off:
+
+```properties
+qits.telemetry.endpoint=http://localhost:8080/observability/api/otel
+qits.telemetry.bearer.enabled=false
+```
+
+`BearerOptOutTest` proves this: every signal reaches the configured endpoint with no Authorization
+header, and the stub token endpoint is never called. The other way to opt out is to not adopt at
+all, which leaves Quarkus' own exporters and their `quarkus.otel.exporter.otlp.*` keys exactly as
+they are.
+
+## No token, and the bounded wait
+
+- **No token means no header.** The export still goes out. The edge answers 401, and that 401 can
+  be seen, while a batch that is dropped silently cannot. `BearerHeaders` logs **one WARN** when the
+  token goes missing, giving the reason (client disabled, not configured, mint failed, timed out).
+  It does not repeat the WARN until a token has come back, which it logs at INFO. All three signals
+  share one supplier, so an idp outage produces one line in total, not one per signal per batch.
+- **The wait is never indefinite.** `TokensHelper` returns a cached token immediately and goes to
+  the idp only after expiry. That fetch is awaited for at most `qits.telemetry.bearer.timeout`. The
+  JDK sender calls the supplier on its own `jdkhttp-executor` thread, never on an event loop and
+  never on the thread that produced the telemetry, so a slow idp holds up one export and nothing
+  else. A fetch that times out keeps running inside the helper, so the next export finds the token
+  cached.
+
+## Native
+
+- **No reflection, no ServiceLoader.** The upstream builders normally find their HTTP sender via
+  `ServiceLoader`. In a native image that lookup depends on build-time registration, and when it
+  misses, the first export fails with "No HttpSenderProvider found". `JdkSenderLoader` is passed as
+  the builders' `ComponentLoader` and constructs `JdkHttpSenderProvider` with `new`. That makes it
+  an ordinary reachable class, and it also settles which sender is used if okhttp ever shows up.
+  Every other SPI returns empty. The only other one the OTLP/HTTP builders read is the compressor
+  registry, which has `gzip`/`none` built in.
+- **The sender is java.net.http**, which native-image supports. The okhttp sender, which Quarkus
+  excludes, would bring in kotlin. HTTPS to the edge needs native SSL. `quarkus-oidc` and
+  `quarkus-rest-client` enable it (verified: their deployment processors produce
+  `ExtensionSslNativeSupportBuildItem`; `quarkus-oidc-client` does not), and the `qits` client's
+  own https call to the idp depends on it already. A service with neither of those extensions sets
+  `quarkus.ssl.native=true`.
+- **Everything is created at runtime init.** The producers run when Quarkus' OpenTelemetry SDK
+  starts (RUNTIME_INIT), so no HttpClient, executor or thread is captured in the image heap. The
+  beans are plain ArC beans resolved at build time. `@Unremovable` is there because the CDI
+  exporter providers look the beans up programmatically.
+- **How it is proven.** This repository builds no application, so it cannot build native. The
+  first adopting service's gate builds the native binary and runs its `@QuarkusIntegrationTest`
+  suite against it. That proves augmentation and image build. The export itself is proven by one
+  IT in that service: it boots the binary with the SDK on, points `qits.telemetry.endpoint` and the
+  `qits` client at a local stub (`StubPlatform` in this module's tests is the shape), and asserts a
+  POST to each of `/v1/traces`, `/v1/logs` and `/v1/metrics` carrying `Authorization: Bearer`.
+
+## Tests
+
+`./mvnw -pl qits-telemetry-core verify`. `TelemetryExportTest` runs a full Quarkus application
+against `StubPlatform`: a JDK `HttpServer` serving the idp's token endpoint, which hands out
+two-second tokens, and the OTLP ingest, which records each POST with its Authorization header. It
+checks that the three beans are the only exporters, that each signal reaches its path with the
+current bearer, and that a token refreshed after expiry is on the next export. `BearerOptOutTest`
+covers the opt-out. `BearerHeadersTest` covers the supplier against a token that changes on
+command: refresh, no token → no header with a single WARN, a second outage warns again, and a
+throwing source.
 
 ---
 
