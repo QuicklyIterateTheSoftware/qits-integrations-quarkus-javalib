@@ -4,8 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- The platform's shared authentication code: forward-auth for user traffic, claim checks for
-         machine tokens, and the one config gate that turns machine enforcement on.
+    <!-- The platform's shared authentication code: claim checks for bearer tokens, and the one
+         config gate that turns machine enforcement on. A service authenticates only bearers; the
+         forward-auth mechanism that believed X-Qits-User is gone (qits-1338).
 
          DELIBERATELY THIN. It does NOT depend on quarkus-oidc. Validating a bearer is the consuming
          service's choice of extension and config; this module only reads what validation left on
@@ -37,8 +38,8 @@
             <artifactId>quarkus-security</artifactId>
         </dependency>
         <dependency>
-            <!-- HttpAuthenticationMechanism and the RoutingContext ForwardAuthMechanism reads. A
-                 consuming service serves HTTP by definition, so this is no new weight. -->
+            <!-- The Router and RoutingContext IssuerUnreachable registers on. A consuming service
+                 serves HTTP by definition, so this is no new weight. -->
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-vertx-http</artifactId>
         </dependency>
@@ -56,8 +57,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <!-- The forward-auth suite drives a real request through the mechanism, so the test
-                 scope needs a REST endpoint to hit. -->
+            <!-- The gate and issuer suites drive real requests, so the test scope needs REST
+                 endpoints to hit. -->
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-rest-jackson</artifactId>
             <scope>test</scope>

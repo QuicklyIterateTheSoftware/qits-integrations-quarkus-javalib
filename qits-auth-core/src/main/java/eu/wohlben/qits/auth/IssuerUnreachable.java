@@ -25,8 +25,8 @@ import java.util.concurrent.TimeoutException;
  * Retrying a misconfiguration would just move the failure to the caller's patience.
  *
  * <p><b>Matched by name, not by type,</b> and that is deliberate: {@code quarkus-oidc} is not a
- * dependency of this library. Services that only take the forward-auth half of it do not carry the
- * extension, and adding it here to reference one exception class would put an issuer client on
+ * dependency of this library. A service that validates no bearers (it only uses the machine gate
+ * switched off) does not carry the extension, and adding it here to reference one exception class would put an issuer client on
  * their classpath to satisfy an import. The name is API — it is what a caller reads in a log line.
  *
  * <p>This handles the window that {@code quarkus.oidc.connection-delay} does not: that key retries

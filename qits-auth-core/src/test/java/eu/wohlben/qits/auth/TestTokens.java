@@ -19,7 +19,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
  */
 final class TestTokens {
 
-  /** A forward-auth user, or anything else that is not a machine. */
+  /** A named identity whose principal is not a JWT — anything that is not a machine. */
   static SecurityIdentity user(String name) {
     return QuarkusSecurityIdentity.builder().setPrincipal(new QuarkusPrincipal(name)).build();
   }

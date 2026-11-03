@@ -20,8 +20,8 @@ import org.eclipse.microprofile.config.ConfigProvider;
  * the header untouched.
  *
  * <p><b>It is diagnostic, not authentication.</b> Nothing may authorize on it: a caller is free to
- * state any name, and the receiver records what it was told. The authenticated principal stays
- * {@code X-Qits-User} and the bearer behind it; this header only makes the trace legible.
+ * state any name, and the receiver records what it was told. The authenticated principal is the
+ * bearer the receiver validated; this header only makes the trace legible.
  */
 public final class CallerHeader {
 

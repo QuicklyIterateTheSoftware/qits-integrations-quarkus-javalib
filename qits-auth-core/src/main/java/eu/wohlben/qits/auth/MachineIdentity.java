@@ -13,8 +13,8 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
  *
  * <p><b>It validates nothing.</b> By the time an identity reaches here, quarkus-oidc has checked the
  * signature, the issuer and the expiry against qits-idp; this class only reports what the token
- * says. An identity with no {@link JsonWebToken} principal — a forward-auth user, or anonymous — is
- * simply not a machine, which every method below reports as "no" rather than as an error.
+ * says. An identity with no {@link JsonWebToken} principal — anonymous, or one some other mechanism
+ * built — is simply not a machine, which every method below reports as "no" rather than as an error.
  *
  * <p>Most callers want {@link MachineAuth}, which adds the rollout gate and turns a "no" into a
  * status code. Use these methods directly when the decision is more than an equality check.

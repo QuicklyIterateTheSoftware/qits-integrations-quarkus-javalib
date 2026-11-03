@@ -5,7 +5,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
-| `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
+| `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Claim checks for bearer tokens, and the one gate that turns machine enforcement on. A service authenticates only bearers. |
 | `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, and provider-state coverage. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
@@ -483,31 +483,25 @@ consumer already has on its test classpath.
 
 ## What it is
 
-Two tracks of identity, in one jar.
+**A service authenticates only bearers.** Every caller — a person's browser page
+or another service — arrives with a bearer token from qits-idp, and the service
+validates it with its own `quarkus-oidc`; this jar reads the result. No identity
+is read from a header: there is no forward-auth mechanism and no `X-Qits-User` /
+`X-Qits-Roles` (it was removed in qits-1338, epic qits-543; the edge stopped
+writing those headers in qits-1373). A request with no bearer is anonymous.
 
-**Users** arrive through qits-gateway, which performs the login and injects
-`X-Qits-User` and `X-Qits-Roles`. `ForwardAuthMechanism` turns those headers into a
-`SecurityIdentity`. A service authenticates nothing itself; the header is
-believed because the gateway strips every client-supplied `X-Qits-*` header
-first. This pair was copy-pasted into eight services and is now in one place —
-identical in behaviour, config keys included.
-
-**Machines** arrive with a bearer token from qits-idp. The service validates it
-with its own `quarkus-oidc`; this jar reads the result. `MachineAuth` answers
-"does this caller hold a token for me, covering this project / workspace /
-branch", behind a rollout gate so a service can ship the check before qits-idp
-exists.
+`MachineAuth` answers "does this caller hold a token for me, covering this
+project / workspace / branch", behind a rollout gate so a service can ship the
+check before qits-idp exists.
 
 **It stays thin on purpose.** No `quarkus-oidc` dependency — validation is the
-service's own choice of extension and config. This jar carries the mechanism,
-the vocabulary, the claim checks and the gate.
+service's own choice of extension and config. This jar carries the vocabulary,
+the claim checks and the gate.
 
 ### Public surface
 
 | Class | |
 | --- | --- |
-| `ForwardAuthMechanism` | Reads `X-Qits-User` and the comma-separated `X-Qits-Roles`; no user header is anonymous, not a denial. |
-| `ForwardAuthIdentityProvider` | Completes that request into an identity whose principal and roles are available to standard Jakarta security annotations. |
 | `QitsClaims` | The claim names (`project`, `workspace`, `branch`) and the `*` that covers every value. Service ids are config, never constants. |
 | `MachineIdentity` | Static, CDI-free reads of a validated token off a `SecurityIdentity`. |
 | `MachineAuth` | The `require*` guards, and the rollout gate they sit behind. |
@@ -557,14 +551,11 @@ service's parent, beside the other reactor modules:
 
 Finally, in the service:
 
-1. **Delete** `…/security/ForwardAuthMechanism.java` and
-   `ForwardAuthIdentityProvider.java`, plus the tests that only re-asserted them
-   (`ForwardAuthTest`, `NoDevUserProfile`, `IdentityEchoResource`) — that suite
-   moved here with the code.
-2. **Delete** the `qits.auth.forward.*` keys from the service's own
+1. **Do not** copy this jar's `qits.auth.machine.*` keys into the service's own
    `META-INF/microprofile-config.properties`. This jar ships them at the same
    ordinal (100), and two files carrying one key make the winner arbitrary.
-3. A fresh clone now needs `git submodule update --init` before `./mvnw verify`.
+   A leftover `qits.auth.forward.*` key is dead: nothing reads it any more.
+2. A fresh clone now needs `git submodule update --init` before `./mvnw verify`.
    An uninitialised submodule fails as maven's `Child module … does not exist`,
    before a line compiles.
 
@@ -572,8 +563,6 @@ Finally, in the service:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `qits.auth.forward.user-header` | `X-Qits-User` | The header qits-gateway asserts. |
-| `qits.auth.forward.dev-user` | `dev` under `%dev`/`%test`, unset otherwise | Synthetic identity when no header arrives. Ignored by a prod build even if it leaks in via env. |
 | `qits.auth.machine.required` | `false` | The rollout gate. |
 | `qits.auth.machine.platform-audience` | `qits-platform` | The one audience every token on the platform carries (rulings 2026-09-13). An enforced call demands it and accepts nothing else. Blank names no audience a token could carry, so it refuses every enforced call. |
 
@@ -613,11 +602,10 @@ quarkus.oidc.token.audience=qits-platform
 Set `quarkus.oidc.token.issuer` when the two diverge — they do the day the idp
 serves users at a public URL and the services keep fetching direct.
 
-Bearer validation sits *beside* forward-auth, it does not replace it: a request
-with no `Authorization` header falls through to the header mechanism and stays
-user traffic.
-
-Services reach qits-idp direct on qits-net, never through the gateway.
+Bearer validation is the only authentication a service does: a request with no
+`Authorization` header is anonymous, and nothing in this jar turns a header into
+an identity. A dev or test run that needs a caller presents a token (or uses
+`@TestSecurity`) — there is no synthetic dev user any more.
 
 Fetching outbound tokens (qits-ci calling qits-cd):
 
@@ -814,7 +802,7 @@ hours, measured live — and the trace cannot say whose request it was. This mod
 
 The header sits in the edge's reserved `X-Qits-*` namespace, so qits-platform-edge strips any
 client-supplied copy. **It is diagnostic, not authentication**: nothing may authorize on it, and
-`X-Qits-User` stays the principal.
+the validated bearer stays the principal.
 
 API jars (JAX-RS, annotation, MP-config, OpenTelemetry API, jboss-logging; CDI API provided), the
 filters and the bean discovered through the jandex index, plus one extension: `quarkus-vertx-http`,
