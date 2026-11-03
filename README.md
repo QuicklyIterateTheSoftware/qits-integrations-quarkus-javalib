@@ -861,15 +861,19 @@ failure for anything longer.
 | Reset, broken pipe, EOF before a response | `GET` `HEAD` `PUT` `DELETE` | The request may have arrived; only an idempotent method survives a resend. |
 | `502`, `503`, `504` **with** `Retry-After` | `GET` `HEAD` `PUT` `DELETE` | The header is what makes it a switchover. `POST` and `PATCH` are never resent once a response arrived. |
 | Unresolvable host, request timeout, any other status, a `503` without `Retry-After` | never | A DNS failure is a wrong name, not a rollover; a bare `503` is an application's answer. |
+| Any request to a **loopback target** — `localhost`, `*.localhost`, `127.0.0.0/8`, `::1` | never (by default) | A service reaches its own host at `http://localhost:8080`, never through the edge, so there is no switchover to wait out; a refusal there is a process that is not listening. |
 
 **Timing.** 250 ms, doubling, within **30 s** from the first attempt. A `Retry-After` in seconds
 raises a pause to at least that long; one that points past the remaining budget ends the retries at
 once. A pause is cut to the budget left, no attempt starts after it, and then the **last error is
 raised, or the last response returned**, unchanged. `qits.http.retry.budget` (`PT10S`, `10s`,
 `500ms`, `0` for off) overrides the budget for the CDI bean and the filter;
-`QitsHttpClients.of(otel, caller, RetryPolicy.none())` and `wrap(raw, otel, caller, policy)` take
-one explicitly — a test that points a client at a closed port wants `none()` rather than thirty
-seconds. The clock and the pauses are `RetryPolicy.Timing`, so tests run the budget in virtual time.
+`QitsHttpClients.of(otel, caller, policy)` and `wrap(raw, otel, caller, policy)` take one
+explicitly. The loopback exemption is read off the URI as written — no name is resolved — and it is
+what keeps a consumer test that points a client at `127.0.0.1:1` or a closed local port as fast as
+it was. `RetryPolicy.standard().withLoopbackRetries()` opts back in, for a test that stands a local
+server in for the edge (this module's own do). The clock and the pauses are `RetryPolicy.Timing`,
+so tests run the budget in virtual time.
 
 **Never retried at all**: a body that cannot be sent twice (for `java.net.http`, anything but the
 JDK's empty, byte-array, string and file publishers; for the REST client, streams, readers,

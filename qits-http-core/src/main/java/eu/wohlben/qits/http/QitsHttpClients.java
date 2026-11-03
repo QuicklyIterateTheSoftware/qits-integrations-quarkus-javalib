@@ -22,7 +22,8 @@ import java.net.http.HttpClient;
  *
  * <p>Every wrapped client also retries an edge switchover under {@link RetryPolicy}: connection
  * failures before the request was sent, resets and {@code 502}/{@code 503}/{@code 504} with {@code
- * Retry-After} for idempotent methods, 250 ms doubling within 30 s. The bean takes the budget from
+ * Retry-After} for idempotent methods, 250 ms doubling within 30 s — and never for a loopback
+ * target, which does not cross the edge. The bean takes the budget from
  * {@value RetryPolicy#BUDGET_PROPERTY}.
  *
  * <p>The OpenTelemetry is whatever the application produces: the SDK under quarkus-opentelemetry,
@@ -76,8 +77,8 @@ public class QitsHttpClients {
   }
 
   /**
-   * A hand-built bean with its own retry policy — {@link RetryPolicy#none()} for a test that
-   * points a client at a closed port and wants the refusal now rather than in thirty seconds.
+   * A hand-built bean with its own retry policy — {@link RetryPolicy#none()} for no retries at
+   * all, {@code standard().withLoopbackRetries()} for a test whose stand-in edge is local.
    */
   public static QitsHttpClients of(OpenTelemetry openTelemetry, String caller, RetryPolicy retry) {
     return new QitsHttpClients(openTelemetry, caller, retry);

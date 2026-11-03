@@ -38,7 +38,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The retry policy on the wire, through the client {@link QitsHttpClients#wrap} builds: a scripted
  * loopback server refuses, resets, hangs up on a TLS handshake or answers a switchover status, and
- * virtual time runs the thirty-second budget instantly. One test class per transport; the REST
+ * virtual time runs the thirty-second budget instantly. The scripted server stands in for the edge
+ * on loopback, so the policy here opts into loopback retries; the default exemption has its own
+ * tests at the end. One test class per transport; the REST
  * client's half is {@code RetryClientFilterTest}.
  */
 class RetryingHttpClientTest {
@@ -66,7 +68,10 @@ class RetryingHttpClientTest {
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
             otel,
             "qits-ci",
-            RetryPolicy.standard().withTiming(timing).withWarnings(warnings::add));
+            RetryPolicy.standard()
+                .withLoopbackRetries()
+                .withTiming(timing)
+                .withWarnings(warnings::add));
   }
 
   @AfterEach
@@ -430,6 +435,76 @@ class RetryingHttpClientTest {
     assertEquals(503L, spans.get(0).getAttributes().get(TracingHttpClient.HTTP_RESPONSE_STATUS_CODE));
     assertEquals(1L, spans.get(1).getAttributes().get(TracingHttpClient.HTTP_REQUEST_RESEND_COUNT));
     assertEquals(200L, spans.get(1).getAttributes().get(TracingHttpClient.HTTP_RESPONSE_STATUS_CODE));
+  }
+
+  // --- the loopback exemption
+
+  @Test
+  void byDefaultALoopbackTargetGetsOneAttempt() throws Exception {
+    HttpClient standard =
+        QitsHttpClients.wrap(
+            HttpClient.newHttpClient(),
+            otel,
+            null,
+            RetryPolicy.standard().withTiming(timing).withWarnings(warnings::add));
+    server.otherwise(respond(503, "Retry-After", "1"));
+
+    assertEquals(
+        503, standard.send(get(server.url("/")), HttpResponse.BodyHandlers.discarding()).statusCode());
+    assertEquals(
+        503,
+        standard
+            .send(
+                get("http://localhost:" + server.port() + "/"),
+                HttpResponse.BodyHandlers.discarding())
+            .statusCode());
+    assertEquals(2, server.connections(), "one attempt each, by address and by name");
+
+    int port = closedPort();
+    assertThrows(
+        ConnectException.class,
+        () -> standard.send(get("http://127.0.0.1:" + port + "/"), HttpResponse.BodyHandlers.discarding()));
+    assertThrows(
+        ExecutionException.class,
+        () ->
+            standard
+                .sendAsync(get("http://127.0.0.1:" + port + "/"), HttpResponse.BodyHandlers.discarding())
+                .get(10, TimeUnit.SECONDS));
+    assertTrue(timing.pauses().isEmpty(), "a closed local port fails at once");
+    assertTrue(warnings.isEmpty());
+  }
+
+  @Test
+  void loopbackIsReadOffTheUriWithoutResolvingAnything() {
+    for (String url :
+        List.of(
+            "http://localhost:8080/x",
+            "http://LOCALHOST/",
+            "http://localhost./",
+            "http://qits-ci.localhost/",
+            "http://127.0.0.1:1/",
+            "http://127.255.3.4/",
+            "http://[::1]:8080/",
+            "http://[0:0:0:0:0:0:0:1]/")) {
+      assertTrue(RetryPolicy.loopback(URI.create(url)), url);
+    }
+    for (String url :
+        List.of(
+            "https://qits-ci.qits.example.org/",
+            "http://qits-ci:8080/",
+            "http://10.0.0.1/",
+            "http://128.0.0.1/",
+            "http://localhost.example.org/",
+            "http://[::2]/",
+            "http://[fe80::1]/")) {
+      assertTrue(!RetryPolicy.loopback(URI.create(url)), url);
+    }
+    assertTrue(!RetryPolicy.standard().retries(URI.create("http://localhost:8080/")));
+    assertTrue(RetryPolicy.standard().retries(URI.create("https://qits-ci.qits.example.org/")));
+    assertTrue(
+        RetryPolicy.standard().withLoopbackRetries().retries(URI.create("http://127.0.0.1/")));
+    assertTrue(
+        !RetryPolicy.none().withLoopbackRetries().retries(URI.create("https://qits-ci.qits.example.org/")));
   }
 
   // --- configuration

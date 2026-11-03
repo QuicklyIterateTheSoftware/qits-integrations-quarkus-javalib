@@ -48,7 +48,8 @@ import java.util.concurrent.Flow;
  * client is <b>not</b> retried; a call site that needs that wraps the call in {@link
  * RetryPolicy#execute} itself, or uses a {@link QitsHttpClients}-wrapped client, which retries both.
  *
- * <p><b>What is never resent.</b> Anything {@link RetryPolicy} would not retry; a request opening
+ * <p><b>What is never resent.</b> Anything {@link RetryPolicy} would not retry — a loopback target
+ * included, since a call to the process's own host never crosses the edge; a request opening
  * an event stream; a body that cannot be written twice (a stream, a reader, a publisher, a
  * multipart form); and any call whose response filters run on an I/O thread, where waiting would
  * block the event loop — in Quarkus they run on a worker unless blocking is disallowed there.
@@ -121,7 +122,7 @@ public class RetryClientFilter implements ClientResponseFilter {
       return;
     }
     RetryPolicy retry = policy();
-    if (retry.budget().isZero()) {
+    if (!retry.retries(request.getUri())) {
       return;
     }
 

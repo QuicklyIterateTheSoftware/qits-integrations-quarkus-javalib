@@ -56,7 +56,10 @@ class RetryClientFilterTest {
         ClientBuilder.newBuilder()
             .register(
                 new RetryClientFilter(
-                    RetryPolicy.standard().withTiming(timing).withWarnings(warnings::add)))
+                    RetryPolicy.standard()
+                        .withLoopbackRetries()
+                        .withTiming(timing)
+                        .withWarnings(warnings::add)))
             .build();
   }
 
@@ -194,6 +197,31 @@ class RetryClientFilterTest {
     assertTrue(refused, thrown::toString);
     assertTrue(timing.pauses().isEmpty());
     assertFalse(warnings.stream().anyMatch(w -> w.contains("attempts")));
+  }
+
+  @Test
+  void byDefaultALoopbackTargetIsNeverResent() {
+    server.otherwise(respond(503, "Retry-After", "1"));
+    Client standard =
+        ClientBuilder.newBuilder()
+            .register(
+                new RetryClientFilter(
+                    RetryPolicy.standard().withTiming(timing).withWarnings(warnings::add)))
+            .build();
+    try {
+      try (Response response = standard.target(server.url("/")).request().get()) {
+        assertEquals(503, response.getStatus());
+      }
+      try (Response response =
+          standard.target("http://localhost:" + server.port() + "/").request().get()) {
+        assertEquals(503, response.getStatus());
+      }
+    } finally {
+      standard.close();
+    }
+    assertEquals(2, server.connections());
+    assertTrue(timing.pauses().isEmpty());
+    assertTrue(warnings.isEmpty());
   }
 
   @Test

@@ -58,13 +58,20 @@ import org.jboss.logging.Logger;
  * request timeout (the request may be half-processed); any other status; and any request whose body
  * cannot be sent twice, or that opens an event stream — SSE reconnection belongs to its own code.
  *
+ * <p><b>Nothing to the process's own host.</b> A call to a loopback target — {@code localhost} (or
+ * a {@code *.localhost} name), {@code 127.0.0.0/8}, {@code ::1} — never crosses the edge: the
+ * platform's rule is that a service reaches itself at {@code http://localhost:8080}, so there is no
+ * switchover to ride out, and a refusal there is a process that is not listening. Such a call gets
+ * one attempt. The check reads the URI's host literally and never resolves a name. {@link
+ * #withLoopbackRetries()} opts back in, for a test whose stand-in for the edge is a loopback server.
+ *
  * <p><b>How long.</b> The first pause is {@value #FIRST_BACKOFF_MILLIS} ms and each one doubles.
  * A {@code Retry-After} in seconds raises a pause to at least that long; one that points past the
  * remaining budget ends the retries at once, because waiting less than the server asked is pointless
  * and waiting longer breaks the promise. A pause is cut to whatever budget remains, and no attempt
  * starts after the budget ({@value #BUDGET_SECONDS} s from the first attempt) is spent — the last
  * error is raised, or the last response returned, unchanged. {@value #BUDGET_PROPERTY} overrides the
- * budget ({@code 0} turns retrying off; a test that points a client at a closed port wants that).
+ * budget ({@code 0} turns retrying off).
  *
  * <p><b>What it says.</b> Nothing for a call that succeeded first time. A call that needed a second
  * attempt logs ONE warning when it is over — succeeded or given up — naming the method, the host,
@@ -84,6 +91,7 @@ public final class RetryPolicy {
   private static final Set<String> IDEMPOTENT = Set.of("GET", "HEAD", "PUT", "DELETE");
   private static final Set<Integer> SWITCHOVER_STATUSES = Set.of(502, 503, 504);
   private static final int MAX_CAUSE_DEPTH = 16;
+  private static final Pattern IPV4 = Pattern.compile("\\d{1,3}(\\.\\d{1,3}){3}");
   private static final Pattern SHORT_DURATION =
       Pattern.compile("(\\d+)\\s*(ms|s|m)?", Pattern.CASE_INSENSITIVE);
 
@@ -148,9 +156,15 @@ public final class RetryPolicy {
   private final Duration budget;
   private final Timing timing;
   private final Consumer<String> warnings;
+  private final boolean loopbackRetries;
 
   private RetryPolicy(
-      Duration firstBackoff, Duration budget, Timing timing, Consumer<String> warnings) {
+      Duration firstBackoff,
+      Duration budget,
+      Timing timing,
+      Consumer<String> warnings,
+      boolean loopbackRetries) {
+    this.loopbackRetries = loopbackRetries;
     this.firstBackoff = firstBackoff;
     this.budget = budget;
     this.timing = timing;
@@ -163,7 +177,8 @@ public final class RetryPolicy {
         Duration.ofMillis(FIRST_BACKOFF_MILLIS),
         Duration.ofSeconds(BUDGET_SECONDS),
         Timing.SYSTEM,
-        LOG::warn);
+        LOG::warn,
+        false);
   }
 
   /** One attempt and no retry: the raw client's behaviour. */
@@ -193,16 +208,65 @@ public final class RetryPolicy {
     if (budget.isNegative()) {
       throw new IllegalArgumentException("a retry budget cannot be negative: " + budget);
     }
-    return new RetryPolicy(firstBackoff, budget, timing, warnings);
+    return new RetryPolicy(firstBackoff, budget, timing, warnings, loopbackRetries);
   }
 
   public RetryPolicy withTiming(Timing timing) {
-    return new RetryPolicy(firstBackoff, budget, timing, warnings);
+    return new RetryPolicy(firstBackoff, budget, timing, warnings, loopbackRetries);
   }
 
   /** Where the one warning per retried call goes; the logger unless a test listens instead. */
   RetryPolicy withWarnings(Consumer<String> warnings) {
-    return new RetryPolicy(firstBackoff, budget, timing, warnings);
+    return new RetryPolicy(firstBackoff, budget, timing, warnings, loopbackRetries);
+  }
+
+  /**
+   * The same policy, retrying loopback targets too. For a test that stands a local server in for
+   * the edge; a service has no use for it, since its loopback calls never cross one.
+   */
+  public RetryPolicy withLoopbackRetries() {
+    return new RetryPolicy(firstBackoff, budget, timing, warnings, true);
+  }
+
+  /**
+   * Whether a call to {@code uri} may be retried at all: a positive budget, and a target that is
+   * not this process's own host unless {@link #withLoopbackRetries()} said otherwise.
+   */
+  public boolean retries(URI uri) {
+    return !budget.isZero() && (loopbackRetries || !loopback(uri));
+  }
+
+  /**
+   * {@code localhost}, a {@code *.localhost} name, {@code 127.0.0.0/8} or {@code ::1}, read off the
+   * URI as written. No name is resolved: a DNS lookup to decide whether to retry would be a network
+   * call of its own.
+   */
+  static boolean loopback(URI uri) {
+    if (uri == null || uri.getHost() == null) {
+      return false;
+    }
+    String host = uri.getHost().toLowerCase(Locale.ROOT);
+    if (host.startsWith("[") && host.endsWith("]")) {
+      host = host.substring(1, host.length() - 1);
+    }
+    if (host.endsWith(".")) {
+      host = host.substring(0, host.length() - 1);
+    }
+    if (host.equals("localhost") || host.endsWith(".localhost")) {
+      return true;
+    }
+    if (IPV4.matcher(host).matches()) {
+      return host.startsWith("127.");
+    }
+    if (host.indexOf(':') >= 0) {
+      try {
+        // A literal: getByName parses it and does no lookup.
+        return java.net.InetAddress.getByName(host).isLoopbackAddress();
+      } catch (java.net.UnknownHostException | RuntimeException notALiteral) {
+        return false;
+      }
+    }
+    return false;
   }
 
   public Duration budget() {
@@ -334,7 +398,8 @@ public final class RetryPolicy {
       Attempt<R, ? extends X> attempt,
       Responses<? super R> responses)
       throws X, InterruptedException {
-    return run(method, uri, replayable, attempt, responses, null, timing.nanoTime());
+    return run(
+        method, uri, replayable && retries(uri), attempt, responses, null, timing.nanoTime());
   }
 
   /**
@@ -350,7 +415,7 @@ public final class RetryPolicy {
       Attempt<R, ? extends X> next,
       Responses<? super R> responses)
       throws X, InterruptedException {
-    return run(method, uri, true, next, responses, first, timing.nanoTime());
+    return run(method, uri, retries(uri), next, responses, first, timing.nanoTime());
   }
 
   private <R, X extends Exception> R run(
@@ -430,7 +495,15 @@ public final class RetryPolicy {
           }
         });
     attemptAsync(
-        method, uri, replayable, attempt, responses, 1, timing.nanoTime(), result, inFlight);
+        method,
+        uri,
+        replayable && retries(uri),
+        attempt,
+        responses,
+        1,
+        timing.nanoTime(),
+        result,
+        inFlight);
     return result;
   }
 
