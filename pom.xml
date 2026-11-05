@@ -47,7 +47,7 @@
 
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.6</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
 
         <!-- Real postgres for qits-db-core's proof rig, as Maven artifacts rather than a container.
              The binaries version is the postgres MAJOR the platform runs, so the suite proves the
