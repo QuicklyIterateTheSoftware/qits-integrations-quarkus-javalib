@@ -100,7 +100,12 @@ class TracingHttpClientTest {
     assertEquals(parent.getSpanContext().getSpanId(), clientSpan.getParentSpanId());
     String traceparent = headers.firstValue("traceparent").orElseThrow();
     assertEquals(
-        "00-" + clientSpan.getTraceId() + "-" + clientSpan.getSpanId() + "-01",
+        "00-"
+            + clientSpan.getTraceId()
+            + "-"
+            + clientSpan.getSpanId()
+            + "-"
+            + clientSpan.getSpanContext().getTraceFlags().asHex(),
         traceparent,
         "the receiver's parent is the CLIENT span, not the caller's own");
 
