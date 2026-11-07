@@ -12,12 +12,6 @@
       "dtos" : [
         {
           "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
-          "kind" : "assembler",
-          "via" : null,
-          "site" : "AlphaResource.get(UUID)"
-        },
-        {
-          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
           "kind" : "factory",
           "via" : null,
           "site" : "AlphaDto.from(Alpha)"
@@ -96,12 +90,6 @@
           "kind" : "assembler",
           "via" : null,
           "site" : "DeltaAssembler.all()"
-        },
-        {
-          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$DeltaSummary",
-          "kind" : "assembler",
-          "via" : null,
-          "site" : "DeltaAssembler.summary(UUID)"
         }
       ],
       "operations" : [
@@ -352,6 +340,92 @@
           "path" : "/papas",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",
           "kind" : "direct"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Quebec",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$QuebecDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "QuebecDto.from(Quebec)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "QuebecResource.get",
+          "method" : "GET",
+          "path" : "/quebecs",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$QuebecDto",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Romeo",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Sierra",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Tango",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Uniform",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$UniformAddress",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "UniformAddress.of(Uniform)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$UniformView",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$UniformAddress",
+          "site" : "UniformView.from(UniformAddress)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "UniformResource.get",
+          "method" : "GET",
+          "path" : "/uniforms",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$UniformView",
+          "kind" : "returns"
         }
       ]
     }

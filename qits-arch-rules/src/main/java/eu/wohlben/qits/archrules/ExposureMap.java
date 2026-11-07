@@ -15,8 +15,9 @@ import java.util.TreeSet;
  * the same bytecode are equal and render the same bytes.
  *
  * <p>The map is the evidence the rules judge and the document a reviewer reads: the rules in
- * {@link EntityExposureRules} only ask whether {@link EntityNode#operations()} is empty, and the
- * JSON carries the whole path, so a red build and the reason for it are read off the same data.
+ * {@link EntityExposureRules} only ask whether {@link EntityNode#operations()} is empty, which the
+ * analysis decides over every link it saw, and the JSON carries one path per handed-out type, so a
+ * red build and the reason for it are read off the same data.
  */
 public final class ExposureMap {
 
@@ -120,8 +121,11 @@ public final class ExposureMap {
    * @param marking the qits-db-core marker, or {@link Marking#DOMAIN}
    * @param reason {@code @Technical(reason)}, or null
    * @param projectionOf {@code @Projection(of)}, or null
-   * @param dtos the types the entity links to, sorted, deduplicated
-   * @param operations the operations those types reach, sorted, deduplicated
+   * @param dtos the types on a path from the entity to an operation, one link each — the most
+   *     direct — plus a {@code via} link's carrier; sorted. Empty for an unexposed entity: links
+   *     that reach nothing are not recorded (see {@link EntityExposure}, "What the map keeps")
+   * @param operations the operations those types reach, one per (operationId, method, path, dto)
+   *     with the strongest kind; sorted. Empty exactly when the entity is unexposed
    */
   public record EntityNode(
       String entity,

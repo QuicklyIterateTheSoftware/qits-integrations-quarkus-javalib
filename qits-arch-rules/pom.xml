@@ -101,6 +101,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- Same fixture-only reason: @RegisterRestClient, whose interfaces (and the types nested
+                 in them) EntityExposure excludes by name. The version is the Quarkus BOM's. -->
+            <groupId>org.eclipse.microprofile.rest.client</groupId>
+            <artifactId>microprofile-rest-client-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The config implementation the tests build their fixtures with — Quarkus' own, so
                  what the rule sees here is what it sees in a service. No Quarkus server: this is
                  the config library alone. -->

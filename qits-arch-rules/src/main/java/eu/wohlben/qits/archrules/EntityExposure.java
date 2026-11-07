@@ -34,6 +34,7 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,10 +63,17 @@ import java.util.stream.Collectors;
  *
  * <p><b>The nodes.</b> Entities are the imported classes annotated {@code @Entity}. Operations are
  * the imported methods annotated with one of jakarta.ws.rs' {@code GET}, {@code POST}, {@code
- * PUT}, {@code PATCH}, {@code DELETE}, {@code HEAD}. Every other imported class is a candidate
- * type — a DTO, or a carrier between an entity and a DTO — except classes that declare operations,
- * throwables and annotations. <em>Imported</em> means in the {@link JavaClasses} handed in:
- * nothing from the JDK or a framework is ever a node.
+ * PUT}, {@code PATCH}, {@code DELETE}, {@code HEAD} — except those of an outbound REST client,
+ * an interface annotated {@code org.eclipse.microprofile.rest.client.inject.RegisterRestClient},
+ * whose verbs are another service's doors. Every other imported class is a candidate type — a DTO,
+ * or a carrier between an entity and a DTO — except classes that declare operations, throwables,
+ * annotations, a {@code @RegisterRestClient} interface and every type nested in one (at any depth
+ * of the outer-class chain: the client's request and response records describe a call this service
+ * makes), and primary-key classes: a class named by an entity's {@code jakarta.persistence.IdClass},
+ * and an {@code @Embeddable} that is the type of an {@code @EmbeddedId} field or getter (any other
+ * {@code @Embeddable} stays a candidate). A key is built from every row and read by every lookup,
+ * so as a carrier it would link anything to anything. <em>Imported</em> means in the {@link
+ * JavaClasses} handed in: nothing from the JDK or a framework is ever a node.
  *
  * <p><b>Reads and builds.</b> A code unit <em>reads</em> a type when it takes it as a parameter
  * (raw, or as the argument of a {@code Collection}, {@code List}, {@code Set}, {@code Optional},
@@ -107,6 +115,28 @@ import java.util.stream.Collectors;
  * {@code Optional} and map values — count too, transitively, so a page DTO carrying {@code
  * List<RowDto>} hands out {@code RowDto}. An entity reached this way is handed out
  * <b>direct</b>ly.
+ *
+ * <p><b>What the map keeps.</b> The verdict is taken over every link above; the map records only
+ * the path. An entity's {@code dtos} are the types an operation link names, each with exactly one
+ * link — the most direct, by kind {@code direct > annotation > factory > mapper > assembler > via},
+ * ties broken by {@code site} — plus, where that link is {@code via}, the carrier's own best link,
+ * because the carrier lies on the path. A link to a type no operation hands out is dropped: in a
+ * real service those outnumber the reaching ones many times over and bury them in the diff. Its
+ * {@code operations} are one row per (operationId, method, path, dto), the kind {@code direct >
+ * returns > schema > body}. An unexposed entity therefore records {@code dtos = []}: what it links
+ * to reaches nothing, which is the finding, and the rest is noise a reviewer cannot act on.
+ *
+ * <p><b>Known limits.</b> The rule errs lenient, never strict, where bytecode cannot tell:
+ *
+ * <ul>
+ *   <li>A <b>body</b> link counts anything an operation's body builds or gets back from a call, so
+ *       an authentication lookup — resolving the caller's session or user row into some imported
+ *       type — counts as handing that type out. It only makes the gate lenient: an entity can pass
+ *       on a lookup nobody reads, never fail on one.
+ *   <li>Only JAX-RS doors are seen. Vert.x {@code Router} routes, {@code @Route} methods, WebSocket
+ *       endpoints and any other non-JAX-RS door are invisible, so an entity handed out only there
+ *       reads as unexposed; mark it, or list it as a known gap.
+ * </ul>
  *
  * <p><b>The map.</b> {@link #verify} renders the analysis as JSON and compares it with a file the
  * service keeps in its repository, failing with a diff when they disagree; {@code
@@ -152,6 +182,11 @@ public final class EntityExposure {
 
   static final String ENTITY = "jakarta.persistence.Entity";
   static final String TABLE = "jakarta.persistence.Table";
+  static final String ID_CLASS = "jakarta.persistence.IdClass";
+  static final String EMBEDDED_ID = "jakarta.persistence.EmbeddedId";
+  static final String EMBEDDABLE = "jakarta.persistence.Embeddable";
+  static final String REGISTER_REST_CLIENT =
+      "org.eclipse.microprofile.rest.client.inject.RegisterRestClient";
   static final String TECHNICAL = "eu.wohlben.qits.db.exposure.Technical";
   static final String PROJECTION = "eu.wohlben.qits.db.exposure.Projection";
   static final String EXPOSES = "eu.wohlben.qits.db.exposure.Exposes";
@@ -221,6 +256,32 @@ public final class EntityExposure {
   private record Cached(int size, ExposureMap map) {}
 
   private static final Pattern GAP = Pattern.compile(EntityExposureRules.KNOWN_GAP_PATTERN);
+
+  /** The most direct link first: direct, annotation, factory, mapper, assembler, via; then site. */
+  static final Comparator<DtoLink> LINK_PRECEDENCE =
+      Comparator.comparingInt(
+              (DtoLink link) ->
+                  List.of(
+                          LinkKind.DIRECT,
+                          LinkKind.ANNOTATION,
+                          LinkKind.FACTORY,
+                          LinkKind.MAPPER,
+                          LinkKind.ASSEMBLER,
+                          LinkKind.VIA)
+                      .indexOf(link.kind()))
+          .thenComparing(DtoLink::site)
+          .thenComparing(link -> link.via() == null ? "" : link.via());
+
+  /** The strongest operation kind first: direct, returns, schema, body. */
+  static final Comparator<OperationLink> OPERATION_PRECEDENCE =
+      Comparator.comparingInt(
+          (OperationLink link) ->
+              List.of(
+                      OperationKind.DIRECT,
+                      OperationKind.RETURNS,
+                      OperationKind.SCHEMA,
+                      OperationKind.BODY)
+                  .indexOf(link.kind()));
 
   private EntityExposure() {}
 
@@ -427,6 +488,10 @@ public final class EntityExposure {
         if (clazz.isAnnotatedWith(ENTITY)) {
           entities.add(clazz.getName());
         }
+        if (insideRestClient(clazz)) {
+          // An outbound call's @GET is somebody else's door, not one of this service's.
+          continue;
+        }
         for (JavaMethod method : clazz.getMethods()) {
           if (verb(method).isPresent()) {
             operations.add(method);
@@ -434,12 +499,15 @@ public final class EntityExposure {
           }
         }
       }
+      Set<String> keys = keyClasses();
       for (JavaClass clazz : imported.values()) {
         String name = clazz.getName();
         if (!entities.contains(name)
             && !operationClasses.contains(name)
             && !clazz.isAnnotation()
-            && !clazz.isAssignableTo(Throwable.class)) {
+            && !clazz.isAssignableTo(Throwable.class)
+            && !insideRestClient(clazz)
+            && !keys.contains(name)) {
           candidates.add(name);
         }
       }
@@ -453,6 +521,63 @@ public final class EntityExposure {
         nodes.add(node(imported.get(entity)));
       }
       return new ExposureMap(nodes);
+    }
+
+    // --- what is never a candidate -------------------------------------------------------------
+
+    /**
+     * An {@code @RegisterRestClient} interface, or a type nested in one at any depth: the shape of
+     * a call this service makes, never a door it offers or a DTO it hands out.
+     */
+    private boolean insideRestClient(JavaClass clazz) {
+      Set<String> seen = new HashSet<>();
+      Optional<JavaClass> current = Optional.of(clazz);
+      while (current.isPresent() && seen.add(current.get().getName())) {
+        JavaClass found = imported.getOrDefault(current.get().getName(), current.get());
+        if (found.isInterface() && found.isAnnotatedWith(REGISTER_REST_CLIENT)) {
+          return true;
+        }
+        current = found.getEnclosingClass();
+      }
+      return false;
+    }
+
+    /**
+     * The primary-key classes: every {@code @IdClass} value on an entity, and every {@code
+     * @Embeddable} that is the type of an {@code @EmbeddedId} field or getter. A key is built from
+     * every row of its entity and read by every lookup, so as a carrier it would link anything to
+     * anything. Other embeddables stay candidates: an embedded value is data like any field.
+     */
+    private Set<String> keyClasses() {
+      Set<String> keys = new HashSet<>();
+      for (JavaClass clazz : imported.values()) {
+        if (clazz.isAnnotatedWith(ENTITY)) {
+          clazz
+              .tryGetAnnotationOfType(ID_CLASS)
+              .flatMap(idClass -> idClass.get("value"))
+              .filter(JavaClass.class::isInstance)
+              .map(type -> ((JavaClass) type).getName())
+              .ifPresent(keys::add);
+        }
+        List<JavaClass> embeddedIds = new ArrayList<>();
+        for (JavaField field : clazz.getFields()) {
+          if (field.isAnnotatedWith(EMBEDDED_ID)) {
+            embeddedIds.add(field.getRawType());
+          }
+        }
+        for (JavaMethod method : clazz.getMethods()) {
+          if (method.isAnnotatedWith(EMBEDDED_ID)) {
+            embeddedIds.add(method.getRawReturnType());
+          }
+        }
+        for (JavaClass type : embeddedIds) {
+          JavaClass found = imported.get(type.getName());
+          if (found != null && found.isAnnotatedWith(EMBEDDABLE)) {
+            keys.add(found.getName());
+          }
+        }
+      }
+      return keys;
     }
 
     // --- entity/carrier → type -----------------------------------------------------------------
@@ -694,35 +819,61 @@ public final class EntityExposure {
 
     private EntityNode node(JavaClass entity) {
       String name = entity.getName();
-      Set<DtoLink> dtos = new LinkedHashSet<>();
+      // Every link, as the verdict sees it: the first hop, and one carrier hop beyond it.
+      Map<String, List<DtoLink>> byType = new HashMap<>();
       for (DtoLink first : links.getOrDefault(name, Set.of())) {
-        dtos.add(first);
+        byType.computeIfAbsent(first.type(), t -> new ArrayList<>()).add(first);
         if (!candidates.contains(first.type())) {
           continue;
         }
         for (DtoLink second : links.getOrDefault(first.type(), Set.of())) {
           if (!second.type().equals(first.type())) {
-            dtos.add(new DtoLink(second.type(), LinkKind.VIA, first.type(), second.site()));
+            byType
+                .computeIfAbsent(second.type(), t -> new ArrayList<>())
+                .add(new DtoLink(second.type(), LinkKind.VIA, first.type(), second.site()));
           }
         }
       }
-      Set<String> types = dtos.stream().map(DtoLink::type).collect(Collectors.toSet());
-      List<OperationLink> operationLinks = new ArrayList<>();
+      // One row per (operationId, method, path, dto), the strongest kind winning.
+      Map<List<String>, OperationLink> operationLinks = new HashMap<>();
       for (Map.Entry<JavaMethod, Map<String, Set<OperationKind>>> entry : exposed.entrySet()) {
         JavaMethod operation = entry.getKey();
         String operationId = operationId(operation);
         String verb = verb(operation).orElseThrow();
         String path = path(operation);
         for (Map.Entry<String, Set<OperationKind>> type : entry.getValue().entrySet()) {
-          if (type.getKey().equals(name)) {
-            dtos.add(new DtoLink(name, LinkKind.DIRECT, null, site(operation)));
-            operationLinks.add(
-                new OperationLink(operationId, verb, path, name, OperationKind.DIRECT));
-          } else if (types.contains(type.getKey())) {
-            for (OperationKind kind : type.getValue()) {
-              operationLinks.add(new OperationLink(operationId, verb, path, type.getKey(), kind));
-            }
+          String dto = type.getKey();
+          Set<OperationKind> kinds;
+          if (dto.equals(name)) {
+            byType
+                .computeIfAbsent(name, t -> new ArrayList<>())
+                .add(new DtoLink(name, LinkKind.DIRECT, null, site(operation)));
+            kinds = Set.of(OperationKind.DIRECT);
+          } else if (byType.containsKey(dto)) {
+            kinds = type.getValue();
+          } else {
+            continue;
           }
+          for (OperationKind kind : kinds) {
+            operationLinks.merge(
+                List.of(operationId, verb, path, dto),
+                new OperationLink(operationId, verb, path, dto, kind),
+                (was, now) -> OPERATION_PRECEDENCE.compare(was, now) <= 0 ? was : now);
+          }
+        }
+      }
+      // The map keeps what reaches an operation: per type, its most direct link; a via link's
+      // carrier is on the path too, so it keeps its own best link beside it.
+      Set<DtoLink> dtos = new LinkedHashSet<>();
+      Set<String> reaching = new TreeSet<>();
+      for (OperationLink link : operationLinks.values()) {
+        reaching.add(link.dto());
+      }
+      for (String type : reaching) {
+        DtoLink best = best(byType.get(type));
+        dtos.add(best);
+        if (best.kind() == LinkKind.VIA) {
+          dtos.add(best(byType.get(best.via())));
         }
       }
       String table =
@@ -746,7 +897,11 @@ public final class EntityExposure {
           reason,
           projectionOf,
           List.copyOf(dtos),
-          operationLinks);
+          List.copyOf(operationLinks.values()));
+    }
+
+    private static DtoLink best(List<DtoLink> candidates) {
+      return candidates.stream().min(LINK_PRECEDENCE).orElseThrow();
     }
 
     // --- helpers -------------------------------------------------------------------------------

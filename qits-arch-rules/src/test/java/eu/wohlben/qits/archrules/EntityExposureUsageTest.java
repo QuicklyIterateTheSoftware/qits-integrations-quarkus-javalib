@@ -21,7 +21,13 @@ import java.util.Set;
     importOptions = ImportOption.OnlyIncludeTests.class)
 class EntityExposureUsageTest {
 
-  static final Set<String> KNOWN_GAPS = Set.of("November qits-1945", "Oscar qits-1945");
+  static final Set<String> KNOWN_GAPS =
+      Set.of(
+          "November qits-1945",
+          "Oscar qits-1945",
+          "Romeo qits-1945",
+          "Sierra qits-1945",
+          "Tango qits-1945");
 
   @ArchTest
   static final ArchRule EXPOSED = EntityExposureRules.everyDomainEntityIsExposed(KNOWN_GAPS);

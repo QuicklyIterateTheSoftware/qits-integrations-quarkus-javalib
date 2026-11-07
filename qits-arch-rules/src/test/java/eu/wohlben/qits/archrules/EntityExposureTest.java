@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -73,8 +74,9 @@ class EntityExposureTest {
 
   @Test
   void aStaticFinderAndANewDtoInOneMethodIsAnAssemblerLink() {
-    assertDto("Delta", "DeltaSummary", LinkKind.ASSEMBLER, "DeltaAssembler.summary(UUID)");
+    // Two assembler links to the same DTO: the map keeps the first by site.
     assertDto("Delta", "DeltaSummary", LinkKind.ASSEMBLER, "DeltaAssembler.all()");
+    assertEquals(1, entity("Delta").dtos().size(), entity("Delta").toString());
     assertOperation(
         "Delta", "DeltaResource.summary", "GET", "/deltas", "DeltaSummary", OperationKind.RETURNS);
   }
@@ -143,6 +145,59 @@ class EntityExposureTest {
     assertTrue(entity("November").dtos().isEmpty(), entity("November").toString());
   }
 
+  // --- what the map keeps --------------------------------------------------------------------------
+
+  @Test
+  void theMapKeepsOneLinkPerReachingTypeAndDropsTypesNoOperationHandsOut() {
+    EntityNode quebec = entity("Quebec");
+    // QuebecDto has a factory, a mapper and an assembler link; QuebecStats reaches nothing.
+    assertEquals(
+        List.of(new DtoLink(F + "QuebecDto", LinkKind.FACTORY, null, "QuebecDto.from(Quebec)")),
+        quebec.dtos());
+    // Returned and named as its schema: one row, the stronger kind.
+    assertEquals(
+        List.of(
+            new OperationLink("QuebecResource.get", "GET", "/quebecs", F + "QuebecDto", OperationKind.RETURNS)),
+        quebec.operations());
+  }
+
+  @Test
+  void aViaLinkKeepsItsCarrierAndAlphaKeepsOnlyItsFactory() {
+    assertEquals(2, entity("Echo").dtos().size(), entity("Echo").toString());
+    // AlphaResource.get also assembles AlphaDto; the factory is the more direct link.
+    assertEquals(
+        List.of(new DtoLink(F + "AlphaDto", LinkKind.FACTORY, null, "AlphaDto.from(Alpha)")),
+        entity("Alpha").dtos());
+  }
+
+  // --- what is never a candidate ---------------------------------------------------------------
+
+  @Test
+  void aRestClientAndWhatIsNestedInItAreNeitherCarriersNorOperations() {
+    EntityNode romeo = entity("Romeo");
+    assertFalse(romeo.exposed(), romeo.toString());
+    assertTrue(romeo.dtos().isEmpty(), romeo.toString());
+    for (EntityNode node : MAP.entities()) {
+      assertFalse(
+          node.operations().stream().anyMatch(op -> op.operationId().startsWith("RomeoClient.")),
+          node.toString());
+      assertFalse(
+          node.dtos().stream().anyMatch(link -> link.type().contains("RomeoClient")),
+          node.toString());
+    }
+  }
+
+  @Test
+  void primaryKeyClassesAreNotCarriersButOtherEmbeddablesAre() {
+    assertFalse(entity("Sierra").exposed(), entity("Sierra").toString());
+    assertFalse(entity("Tango").exposed(), entity("Tango").toString());
+    assertDto("Uniform", "UniformAddress", LinkKind.FACTORY, "UniformAddress.of(Uniform)");
+    DtoLink via = dto("Uniform", "UniformView", LinkKind.VIA);
+    assertEquals(F + "UniformAddress", via.via());
+    assertOperation(
+        "Uniform", "UniformResource.get", "GET", "/uniforms", "UniformView", OperationKind.RETURNS);
+  }
+
   @Test
   void theAnalysisIsCachedPerImportAndIsDeterministic() {
     assertSame(MAP, EntityExposure.analyze(FIXTURES));
@@ -162,17 +217,25 @@ class EntityExposureTest {
                 + " DTO an operation returns, mark it @Technical"),
         report);
     assertTrue(report.contains("list it as a known gap \"November qits-NNNN\""), report);
+    // Exposed only through a REST client's nested record or a primary-key class: not exposed.
+    for (String excluded : Set.of("Romeo", "Sierra", "Tango")) {
+      assertTrue(
+          report.contains(F + excluded + " is a domain entity no operation exposes"),
+          excluded + ":\n" + report);
+    }
     for (String fine :
         Set.of("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India",
-            "Kilo", "Lima", "Mike", "Oscar", "Papa")) {
+            "Kilo", "Lima", "Mike", "Oscar", "Papa", "Quebec", "Uniform")) {
       assertFalse(report.contains("LinkFixtures$" + fine + " "), fine + ":\n" + report);
     }
   }
 
   @Test
   void aKnownGapExcusesTheEntityAndIsReal() {
-    assertClean(EntityExposureRules.everyDomainEntityIsExposed(Set.of("November qits-1", "Oscar qits-2")), FIXTURES);
-    assertClean(EntityExposureRules.knownGapsAreReal(Set.of("November qits-1", "Oscar qits-2")), FIXTURES);
+    Set<String> gaps =
+        Set.of("November qits-1", "Oscar qits-2", "Romeo qits-3", "Sierra qits-4", "Tango qits-5");
+    assertClean(EntityExposureRules.everyDomainEntityIsExposed(gaps), FIXTURES);
+    assertClean(EntityExposureRules.knownGapsAreReal(gaps), FIXTURES);
   }
 
   @Test

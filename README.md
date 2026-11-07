@@ -533,6 +533,17 @@ operation's **body** news it, or when `@APIResponse(content = @Content(schema = 
 = …)))` names it (**schema**); an operation returning the entity itself exposes it **direct**ly.
 The class javadoc of `EntityExposure` has the precise definitions.
 
+Some types are never candidates, which changes the verdict as well as the map: an outbound REST
+client — an interface annotated `@RegisterRestClient` — and every type nested in it (its request and
+response records describe a call this service makes; its own `@GET`s are not this service's
+operations either), and primary-key classes: whatever an entity's `@IdClass` names, and an
+`@Embeddable` that is the type of an `@EmbeddedId` (other embeddables stay candidates). A key is
+built from every row and read by every lookup, so as a carrier it would link anything to anything.
+
+Two known limits, both lenient: a **body** link counts anything an operation's body builds or gets
+back from a call, an authentication lookup included; and only JAX-RS doors are seen, so an entity
+handed out only on a Vert.x `Router` route or another non-JAX-RS door reads as unexposed.
+
 `everyDomainEntityIsExposed` fails an unmarked, unexposed, unlisted entity and names the three ways
 out. `knownGapsAreReal` fails a malformed entry and one that names no entity, a marked one, or one
 an operation now exposes. `markersAreWellFormed` fails a blank `@Technical` reason, a `@Projection.of`
@@ -542,7 +553,12 @@ not shaped `<application>:<EntitySimpleName>`, both markers at once, either on a
 `EntityExposure.verify` renders the map — `formatVersion`, `application`, and per entity its table,
 marking, known gap, linked `dtos` (type, kind, via, site) and `operations` (operationId, method,
 path, dto, kind), all sorted, LF, trailing newline — and compares it with the file; a missing or
-different file fails with a diff. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
+different file fails with a diff. The map is **pruned** to stay reviewable as a diff: the verdict is
+taken over every link, but `dtos` lists only the types on a path to an operation, **one link per
+type** — the most direct, `direct > annotation > factory > mapper > assembler > via`, ties broken by
+`site` — plus a `via` link's carrier; links to types no operation hands out are dropped, so an
+unexposed entity records `dtos: []`. `operations` holds one row per (operationId, method, path,
+dto), the kind `direct > returns > schema > body`. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
 instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
 real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
 rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.

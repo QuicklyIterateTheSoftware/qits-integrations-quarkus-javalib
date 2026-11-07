@@ -3,7 +3,12 @@ package eu.wohlben.qits.archrules.exposure.fixture.links;
 import eu.wohlben.qits.db.exposure.Exposes;
 import eu.wohlben.qits.db.exposure.Projection;
 import eu.wohlben.qits.db.exposure.Technical;
+import jakarta.persistence.Embeddable;
+import jakarta.persistence.Embedded;
+import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -19,6 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 
 /**
  * One entity per way of reaching an operation, each with the smallest code that shows it, plus
@@ -336,6 +342,189 @@ public final class LinkFixtures {
     @GET
     public List<Papa> list() {
       return List.of();
+    }
+  }
+
+  // --- pruning: one link per reaching type, nothing for a type no operation hands out ----------
+
+  /** Three links to QuebecDto, one to QuebecStats; the map keeps only QuebecDto's factory. */
+  @Entity
+  public static class Quebec {
+    public String name;
+
+    public static Quebec findById(UUID id) {
+      return null;
+    }
+  }
+
+  public record QuebecDto(String name) {
+    public static QuebecDto from(Quebec quebec) {
+      return new QuebecDto(quebec.name);
+    }
+  }
+
+  public interface QuebecMapper {
+    QuebecDto toDto(Quebec quebec);
+  }
+
+  /** Built from Quebec, handed out by nothing: an assembler link the map drops. */
+  public record QuebecStats(int length) {}
+
+  public static class QuebecService {
+    public QuebecStats stats(UUID id) {
+      return new QuebecStats(Quebec.findById(id).name.length());
+    }
+  }
+
+  @Path("/quebecs")
+  public static class QuebecResource {
+    /** Returns QuebecDto and names it as its schema too: one operation row, kind returns. */
+    @GET
+    @APIResponse(
+        responseCode = "200",
+        content = @Content(schema = @Schema(implementation = QuebecDto.class)))
+    public QuebecDto get(UUID id) {
+      return QuebecDto.from(Quebec.findById(id));
+    }
+  }
+
+  // --- excluded: an outbound REST client and what is nested in it ------------------------------
+
+  /** Reachable only through RomeoClient.RomeoState: unexposed. */
+  @Entity
+  public static class Romeo {
+    public String name;
+  }
+
+  @RegisterRestClient(configKey = "peer")
+  @Path("/peer/romeos")
+  public interface RomeoClient {
+    /** Another service's door: not an operation of this one. */
+    @GET
+    RomeoState state();
+
+    /** The response of a call this service makes: never a carrier, never a DTO. */
+    record RomeoState(String name) {
+      public static RomeoState of(Romeo romeo) {
+        return new RomeoState(romeo.name);
+      }
+    }
+  }
+
+  public record RomeoView(String label) {
+    public static RomeoView from(RomeoClient.RomeoState state) {
+      return new RomeoView(state.name());
+    }
+  }
+
+  @Path("/romeos")
+  public static class RomeoResource {
+    @GET
+    public RomeoView get() {
+      return null;
+    }
+
+    @GET
+    @Path("raw")
+    public RomeoClient.RomeoState raw() {
+      return null;
+    }
+  }
+
+  // --- excluded: primary-key classes -------------------------------------------------------------
+
+  /** Reachable only through its @IdClass key: unexposed. */
+  @Entity
+  @IdClass(SierraId.class)
+  public static class Sierra {
+    @Id public String left;
+    @Id public String right;
+  }
+
+  public static class SierraId {
+    public String left;
+    public String right;
+
+    public SierraId() {}
+
+    public SierraId(Sierra sierra) {
+      this.left = sierra.left;
+      this.right = sierra.right;
+    }
+  }
+
+  public record SierraView(String key) {
+    public static SierraView from(SierraId id) {
+      return new SierraView(id.left + "/" + id.right);
+    }
+  }
+
+  @Path("/sierras")
+  public static class SierraResource {
+    @GET
+    public SierraView get() {
+      return null;
+    }
+  }
+
+  /** Reachable only through its @EmbeddedId key: unexposed. */
+  @Entity
+  public static class Tango {
+    @EmbeddedId public TangoKey id;
+  }
+
+  @Embeddable
+  public static class TangoKey {
+    public String left;
+    public String right;
+
+    public static TangoKey of(Tango tango) {
+      return tango.id;
+    }
+  }
+
+  public record TangoView(String key) {
+    public static TangoView from(TangoKey key) {
+      return new TangoView(key.left + "/" + key.right);
+    }
+  }
+
+  @Path("/tangos")
+  public static class TangoResource {
+    @GET
+    public TangoView get() {
+      return null;
+    }
+  }
+
+  // --- kept: an @Embeddable that is no key is a carrier like any other ---------------------------
+
+  @Entity
+  public static class Uniform {
+    @Id public UUID id;
+    @Embedded public UniformAddress address;
+  }
+
+  @Embeddable
+  public static class UniformAddress {
+    public String city;
+
+    public static UniformAddress of(Uniform uniform) {
+      return uniform.address;
+    }
+  }
+
+  public record UniformView(String city) {
+    public static UniformView from(UniformAddress address) {
+      return new UniformView(address.city);
+    }
+  }
+
+  @Path("/uniforms")
+  public static class UniformResource {
+    @GET
+    public UniformView get() {
+      return null;
     }
   }
 }
