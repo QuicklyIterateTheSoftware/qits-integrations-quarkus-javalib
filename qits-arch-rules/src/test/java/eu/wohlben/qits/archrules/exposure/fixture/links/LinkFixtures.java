@@ -527,4 +527,32 @@ public final class LinkFixtures {
       return null;
     }
   }
+
+  // --- excluded: an enum is a value, never a carrier --------------------------------------------
+
+  /** Reachable only through an enum a method returns: unexposed. */
+  @Entity
+  public static class Victor {
+    public String name;
+
+    public static VictorStatus statusOf(Victor victor) {
+      return VictorStatus.ACTIVE;
+    }
+  }
+
+  public enum VictorStatus {
+    ACTIVE,
+    RETIRED
+  }
+
+  /** What an operation actually hands out; the enum rides along as a field, never as a carrier. */
+  public record VictorView(VictorStatus status) {}
+
+  @Path("/victors")
+  public static class VictorResource {
+    @GET
+    public VictorView get() {
+      return null;
+    }
+  }
 }

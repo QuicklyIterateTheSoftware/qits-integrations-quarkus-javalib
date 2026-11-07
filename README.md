@@ -539,6 +539,9 @@ response records describe a call this service makes; its own `@GET`s are not thi
 operations either), and primary-key classes: whatever an entity's `@IdClass` names, and an
 `@Embeddable` that is the type of an `@EmbeddedId` (other embeddables stay candidates). A key is
 built from every row and read by every lookup, so as a carrier it would link anything to anything.
+Nor is an enum class (`JavaClass.isEnum()`): a value like a status or a kind, never a carrier of
+entity data, so it can be neither an entity→type link target, a via carrier, nor an operation row's
+`dto` — only the enum class itself is excluded, never a type merely nested in one.
 
 Two known limits, both lenient: a **body** link counts anything an operation's body builds or gets
 back from a call, an authentication lookup included; and only JAX-RS doors are seen, so an entity

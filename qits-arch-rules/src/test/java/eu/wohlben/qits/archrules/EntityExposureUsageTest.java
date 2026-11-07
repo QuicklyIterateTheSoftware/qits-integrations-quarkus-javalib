@@ -27,7 +27,8 @@ class EntityExposureUsageTest {
           "Oscar qits-1945",
           "Romeo qits-1945",
           "Sierra qits-1945",
-          "Tango qits-1945");
+          "Tango qits-1945",
+          "Victor qits-1945");
 
   @ArchTest
   static final ArchRule EXPOSED = EntityExposureRules.everyDomainEntityIsExposed(KNOWN_GAPS);

@@ -72,8 +72,11 @@ import java.util.stream.Collectors;
  * makes), and primary-key classes: a class named by an entity's {@code jakarta.persistence.IdClass},
  * and an {@code @Embeddable} that is the type of an {@code @EmbeddedId} field or getter (any other
  * {@code @Embeddable} stays a candidate). A key is built from every row and read by every lookup,
- * so as a carrier it would link anything to anything. <em>Imported</em> means in the {@link
- * JavaClasses} handed in: nothing from the JDK or a framework is ever a node.
+ * so as a carrier it would link anything to anything. Nor is an enum class ({@code
+ * JavaClass.isEnum()}): a value like a status or a kind, never a carrier of entity data, so it can
+ * be neither an entity→type link target, a via carrier, nor an operation row's {@code dto} — only
+ * the enum class itself is excluded, never a type merely nested in one. <em>Imported</em> means in
+ * the {@link JavaClasses} handed in: nothing from the JDK or a framework is ever a node.
  *
  * <p><b>Reads and builds.</b> A code unit <em>reads</em> a type when it takes it as a parameter
  * (raw, or as the argument of a {@code Collection}, {@code List}, {@code Set}, {@code Optional},
@@ -502,12 +505,15 @@ public final class EntityExposure {
       Set<String> keys = keyClasses();
       for (JavaClass clazz : imported.values()) {
         String name = clazz.getName();
+        // An enum is a value (a status, a kind), never a carrier of entity data; only the enum
+        // class itself is excluded here, not a type merely nested in one.
         if (!entities.contains(name)
             && !operationClasses.contains(name)
             && !clazz.isAnnotation()
             && !clazz.isAssignableTo(Throwable.class)
             && !insideRestClient(clazz)
-            && !keys.contains(name)) {
+            && !keys.contains(name)
+            && !clazz.isEnum()) {
           candidates.add(name);
         }
       }

@@ -428,6 +428,16 @@
           "kind" : "returns"
         }
       ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Victor",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
     }
   ]
 }

@@ -199,6 +199,21 @@ class EntityExposureTest {
   }
 
   @Test
+  void anEnumIsNeitherALinkTargetNorAViaCarrierNorAnOperationDto() {
+    EntityNode victor = entity("Victor");
+    assertFalse(victor.exposed(), victor.toString());
+    assertTrue(victor.dtos().isEmpty(), victor.toString());
+    for (EntityNode node : MAP.entities()) {
+      assertFalse(
+          node.dtos().stream().anyMatch(link -> link.type().contains("VictorStatus")),
+          node.toString());
+      assertFalse(
+          node.operations().stream().anyMatch(op -> op.dto().contains("VictorStatus")),
+          node.toString());
+    }
+  }
+
+  @Test
   void theAnalysisIsCachedPerImportAndIsDeterministic() {
     assertSame(MAP, EntityExposure.analyze(FIXTURES));
     assertEquals(MAP, EntityExposure.analyze(new ClassFileImporter().importPackages(LINKS)));
@@ -217,8 +232,9 @@ class EntityExposureTest {
                 + " DTO an operation returns, mark it @Technical"),
         report);
     assertTrue(report.contains("list it as a known gap \"November qits-NNNN\""), report);
-    // Exposed only through a REST client's nested record or a primary-key class: not exposed.
-    for (String excluded : Set.of("Romeo", "Sierra", "Tango")) {
+    // Exposed only through a REST client's nested record, a primary-key class or an enum: not
+    // exposed.
+    for (String excluded : Set.of("Romeo", "Sierra", "Tango", "Victor")) {
       assertTrue(
           report.contains(F + excluded + " is a domain entity no operation exposes"),
           excluded + ":\n" + report);
@@ -233,7 +249,13 @@ class EntityExposureTest {
   @Test
   void aKnownGapExcusesTheEntityAndIsReal() {
     Set<String> gaps =
-        Set.of("November qits-1", "Oscar qits-2", "Romeo qits-3", "Sierra qits-4", "Tango qits-5");
+        Set.of(
+            "November qits-1",
+            "Oscar qits-2",
+            "Romeo qits-3",
+            "Sierra qits-4",
+            "Tango qits-5",
+            "Victor qits-6");
     assertClean(EntityExposureRules.everyDomainEntityIsExposed(gaps), FIXTURES);
     assertClean(EntityExposureRules.knownGapsAreReal(gaps), FIXTURES);
   }
