@@ -118,7 +118,13 @@ class EntityExposureTest {
   @Test
   void aDtoHeldAsAListFieldIsExposedByTheOperationReturningItsHolder() {
     assertDto("Hotel", "HotelRow", LinkKind.FACTORY, "HotelRow.from(Hotel)");
-    assertOperation("Hotel", "HotelResource.page", "GET", "/hotels", "HotelRow", OperationKind.RETURNS);
+    // HotelPage (the holder, reached via HotelRow) and HotelRow itself both return the same way:
+    // one collapsed row, keeping HotelPage — it sorts first.
+    assertEquals(
+        List.of(
+            new OperationLink(
+                "HotelResource.page", "GET", "/hotels", F + "HotelPage", OperationKind.RETURNS)),
+        entity("Hotel").operations());
   }
 
   @Test
@@ -168,6 +174,40 @@ class EntityExposureTest {
     assertEquals(
         List.of(new DtoLink(F + "AlphaDto", LinkKind.FACTORY, null, "AlphaDto.from(Alpha)")),
         entity("Alpha").dtos());
+  }
+
+  @Test
+  void anOperationReachedThroughSeveralDtosCollapsesToOneRowButDtosListsThemAll() {
+    EntityNode whiskey = entity("Whiskey");
+    // dtos still names every DTO on a path to an operation: the collapse is operations-only.
+    // WhiskeyPage's own constructor reads WhiskeyAlpha, so it rides along as a via carrier too.
+    assertEquals(5, whiskey.dtos().size(), whiskey.toString());
+    dto("Whiskey", "WhiskeyAlpha", LinkKind.FACTORY);
+    dto("Whiskey", "WhiskeyBeta", LinkKind.FACTORY);
+    dto("Whiskey", "WhiskeyZulu", LinkKind.FACTORY);
+    dto("Whiskey", "WhiskeyAardvark", LinkKind.FACTORY);
+    dto("Whiskey", "WhiskeyPage", LinkKind.VIA);
+
+    // WhiskeyPage carries WhiskeyAlpha and WhiskeyBeta, both returned the same way (returns):
+    // kinds tie, so the row keeps the lexicographically first dto.
+    assertEquals(
+        List.of(
+            new OperationLink(
+                "WhiskeyResource.page", "GET", "/whiskeys", F + "WhiskeyAlpha", OperationKind.RETURNS)),
+        whiskey.operations().stream()
+            .filter(op -> op.operationId().equals("WhiskeyResource.page"))
+            .toList());
+
+    // The two fetch() overloads share the default operationId: one returns WhiskeyZulu directly
+    // (returns), the other's Response body news WhiskeyAardvark (body). The row keeps the
+    // stronger kind even though WhiskeyAardvark sorts first.
+    assertEquals(
+        List.of(
+            new OperationLink(
+                "WhiskeyResource.fetch", "GET", "/whiskeys", F + "WhiskeyZulu", OperationKind.RETURNS)),
+        whiskey.operations().stream()
+            .filter(op -> op.operationId().equals("WhiskeyResource.fetch"))
+            .toList());
   }
 
   // --- what is never a candidate ---------------------------------------------------------------

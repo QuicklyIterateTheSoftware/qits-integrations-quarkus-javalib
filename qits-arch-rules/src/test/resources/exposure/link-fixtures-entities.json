@@ -211,13 +211,6 @@
           "path" : "/hotels",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelPage",
           "kind" : "returns"
-        },
-        {
-          "operationId" : "HotelResource.page",
-          "method" : "GET",
-          "path" : "/hotels",
-          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelRow",
-          "kind" : "returns"
         }
       ]
     },
@@ -438,6 +431,62 @@
       "knownGap" : "qits-1945",
       "dtos" : [ ],
       "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Whiskey",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyAardvark",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "WhiskeyAardvark.from(Whiskey)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyAlpha",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "WhiskeyAlpha.from(Whiskey)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyBeta",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "WhiskeyBeta.from(Whiskey)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyPage",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyAlpha",
+          "site" : "WhiskeyPage.<init>(WhiskeyAlpha, WhiskeyBeta)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyZulu",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "WhiskeyZulu.from(Whiskey)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "WhiskeyResource.fetch",
+          "method" : "GET",
+          "path" : "/whiskeys",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyZulu",
+          "kind" : "returns"
+        },
+        {
+          "operationId" : "WhiskeyResource.page",
+          "method" : "GET",
+          "path" : "/whiskeys",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyAlpha",
+          "kind" : "returns"
+        }
+      ]
     }
   ]
 }

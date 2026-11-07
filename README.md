@@ -560,8 +560,10 @@ different file fails with a diff. The map is **pruned** to stay reviewable as a 
 taken over every link, but `dtos` lists only the types on a path to an operation, **one link per
 type** — the most direct, `direct > annotation > factory > mapper > assembler > via`, ties broken by
 `site` — plus a `via` link's carrier; links to types no operation hands out are dropped, so an
-unexposed entity records `dtos: []`. `operations` holds one row per (operationId, method, path,
-dto), the kind `direct > returns > schema > body`. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
+unexposed entity records `dtos: []`. `operations` holds **one row per (operationId, method, path)**:
+where several of the entity's DTOs reach the same operation, `dto` is the best one by kind,
+`direct > returns > schema > body`, ties broken by `dto` FQN lexicographically, and `kind` is that
+row's kind. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
 instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
 real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
 rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.

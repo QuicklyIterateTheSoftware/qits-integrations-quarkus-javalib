@@ -93,14 +93,17 @@ public final class ExposureMap {
   }
 
   /**
-   * One operation that hands out one of an entity's linked types.
+   * One operation that hands out an entity's linked types, one row per (operationId, method,
+   * path): where several of the entity's DTOs reach it, {@code dto} is the best one by kind
+   * ({@code direct > returns > schema > body}), ties broken by {@code dto} FQN lexicographically,
+   * and {@code kind} is that row's kind.
    *
    * @param operationId {@code @Operation(operationId)} if set, else {@code
    *     "<DeclaringSimpleName>.<method>"}
    * @param method the HTTP verb
    * @param path the class {@code @Path} and the method {@code @Path} joined, as written
-   * @param dto the linked type the operation hands out
-   * @param kind how it hands it out
+   * @param dto the best-by-kind linked type the operation hands out
+   * @param kind how it hands {@code dto} out
    */
   public record OperationLink(
       String operationId, String method, String path, String dto, OperationKind kind) {
@@ -124,8 +127,8 @@ public final class ExposureMap {
    * @param dtos the types on a path from the entity to an operation, one link each — the most
    *     direct — plus a {@code via} link's carrier; sorted. Empty for an unexposed entity: links
    *     that reach nothing are not recorded (see {@link EntityExposure}, "What the map keeps")
-   * @param operations the operations those types reach, one per (operationId, method, path, dto)
-   *     with the strongest kind; sorted. Empty exactly when the entity is unexposed
+   * @param operations the operations those types reach, one row per (operationId, method, path)
+   *     naming the best-by-kind dto; sorted. Empty exactly when the entity is unexposed
    */
   public record EntityNode(
       String entity,

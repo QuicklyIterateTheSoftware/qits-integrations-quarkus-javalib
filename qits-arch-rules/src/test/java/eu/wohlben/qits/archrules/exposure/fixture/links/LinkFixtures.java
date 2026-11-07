@@ -388,6 +388,69 @@ public final class LinkFixtures {
     }
   }
 
+  // --- collapse: one operation row per (operationId, method, path), even reached by several ----
+  // --- DTOs ---------------------------------------------------------------------------------------
+
+  /**
+   * WhiskeyPage carries both WhiskeyAlpha and WhiskeyBeta as fields, both factory-linked to
+   * Whiskey and both returned the same way: WhiskeyResource.page's row keeps WhiskeyAlpha — same
+   * kind, lexicographically first.
+   */
+  @Entity
+  public static class Whiskey {
+    public String name;
+  }
+
+  public record WhiskeyAlpha(String name) {
+    public static WhiskeyAlpha from(Whiskey whiskey) {
+      return new WhiskeyAlpha(whiskey.name);
+    }
+  }
+
+  public record WhiskeyBeta(String name) {
+    public static WhiskeyBeta from(Whiskey whiskey) {
+      return new WhiskeyBeta(whiskey.name);
+    }
+  }
+
+  public record WhiskeyPage(WhiskeyAlpha alpha, WhiskeyBeta beta) {}
+
+  /**
+   * WhiskeyResource.fetch(UUID) returns WhiskeyZulu directly (returns); the no-arg overload
+   * shares the same default operationId ("WhiskeyResource.fetch") and returns a Response whose
+   * body news WhiskeyAardvark (body). Both are factory-linked to Whiskey. The collapsed row keeps
+   * WhiskeyZulu: the stronger kind wins even though WhiskeyAardvark sorts first.
+   */
+  public record WhiskeyZulu(String name) {
+    public static WhiskeyZulu from(Whiskey whiskey) {
+      return new WhiskeyZulu(whiskey.name);
+    }
+  }
+
+  public record WhiskeyAardvark(String name) {
+    public static WhiskeyAardvark from(Whiskey whiskey) {
+      return new WhiskeyAardvark(whiskey.name);
+    }
+  }
+
+  @Path("/whiskeys")
+  public static class WhiskeyResource {
+    @GET
+    public WhiskeyPage page() {
+      return null;
+    }
+
+    @GET
+    public WhiskeyZulu fetch(UUID id) {
+      return WhiskeyZulu.from(null);
+    }
+
+    @GET
+    public Response fetch() {
+      return Response.ok(WhiskeyAardvark.from(null)).build();
+    }
+  }
+
   // --- excluded: an outbound REST client and what is nested in it ------------------------------
 
   /** Reachable only through RomeoClient.RomeoState: unexposed. */

@@ -125,9 +125,12 @@ import java.util.stream.Collectors;
  * ties broken by {@code site} — plus, where that link is {@code via}, the carrier's own best link,
  * because the carrier lies on the path. A link to a type no operation hands out is dropped: in a
  * real service those outnumber the reaching ones many times over and bury them in the diff. Its
- * {@code operations} are one row per (operationId, method, path, dto), the kind {@code direct >
- * returns > schema > body}. An unexposed entity therefore records {@code dtos = []}: what it links
- * to reaches nothing, which is the finding, and the rest is noise a reviewer cannot act on.
+ * {@code operations} are one row per (operationId, method, path): the {@code dto} is the best one
+ * reaching the entity through that operation, by kind {@code direct > returns > schema > body},
+ * ties broken by {@code dto} FQN lexicographically, and {@code kind} is that row's kind. An
+ * operation reaching the entity through several DTOs therefore still gets one row, not one per
+ * DTO. An unexposed entity therefore records {@code dtos = []}: what it links to reaches nothing,
+ * which is the finding, and the rest is noise a reviewer cannot act on.
  *
  * <p><b>Known limits.</b> The rule errs lenient, never strict, where bytecode cannot tell:
  *
@@ -275,16 +278,20 @@ public final class EntityExposure {
           .thenComparing(DtoLink::site)
           .thenComparing(link -> link.via() == null ? "" : link.via());
 
-  /** The strongest operation kind first: direct, returns, schema, body. */
+  /**
+   * The strongest operation kind first: direct, returns, schema, body; ties broken by dto FQN
+   * lexicographically, so one (operationId, method, path) row picks its dto deterministically.
+   */
   static final Comparator<OperationLink> OPERATION_PRECEDENCE =
-      Comparator.comparingInt(
-          (OperationLink link) ->
-              List.of(
-                      OperationKind.DIRECT,
-                      OperationKind.RETURNS,
-                      OperationKind.SCHEMA,
-                      OperationKind.BODY)
-                  .indexOf(link.kind()));
+      Comparator.<OperationLink>comparingInt(
+              link ->
+                  List.of(
+                          OperationKind.DIRECT,
+                          OperationKind.RETURNS,
+                          OperationKind.SCHEMA,
+                          OperationKind.BODY)
+                      .indexOf(link.kind()))
+          .thenComparing(OperationLink::dto);
 
   private EntityExposure() {}
 
@@ -840,8 +847,12 @@ public final class EntityExposure {
           }
         }
       }
-      // One row per (operationId, method, path, dto), the strongest kind winning.
+      // One row per (operationId, method, path): the best dto by kind (direct > returns > schema
+      // > body), ties broken by dto FQN lexicographically — see OPERATION_PRECEDENCE. Collapsing
+      // rows must not shrink what reaches an operation at all, so every dto that reaches one —
+      // not only the one its row keeps — is tracked separately in `reaching`, for `dtos` below.
       Map<List<String>, OperationLink> operationLinks = new HashMap<>();
+      Set<String> reaching = new TreeSet<>();
       for (Map.Entry<JavaMethod, Map<String, Set<OperationKind>>> entry : exposed.entrySet()) {
         JavaMethod operation = entry.getKey();
         String operationId = operationId(operation);
@@ -860,9 +871,10 @@ public final class EntityExposure {
           } else {
             continue;
           }
+          reaching.add(dto);
           for (OperationKind kind : kinds) {
             operationLinks.merge(
-                List.of(operationId, verb, path, dto),
+                List.of(operationId, verb, path),
                 new OperationLink(operationId, verb, path, dto, kind),
                 (was, now) -> OPERATION_PRECEDENCE.compare(was, now) <= 0 ? was : now);
           }
@@ -871,10 +883,6 @@ public final class EntityExposure {
       // The map keeps what reaches an operation: per type, its most direct link; a via link's
       // carrier is on the path too, so it keeps its own best link beside it.
       Set<DtoLink> dtos = new LinkedHashSet<>();
-      Set<String> reaching = new TreeSet<>();
-      for (OperationLink link : operationLinks.values()) {
-        reaching.add(link.dto());
-      }
       for (String type : reaching) {
         DtoLink best = best(byType.get(type));
         dtos.add(best);
