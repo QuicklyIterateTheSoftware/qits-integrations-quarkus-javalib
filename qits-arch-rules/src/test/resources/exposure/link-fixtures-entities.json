@@ -1,0 +1,359 @@
+{
+  "formatVersion" : 1,
+  "application" : "qits-fixture",
+  "entities" : [
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Alpha",
+      "table" : "alpha",
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "AlphaResource.get(UUID)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "AlphaDto.from(Alpha)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "AlphaResource.get",
+          "method" : "GET",
+          "path" : "/alphas/{id}",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Bravo",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$BravoDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "BravoDto.<init>(Bravo)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "listBravos",
+          "method" : "GET",
+          "path" : "/bravos",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$BravoDto",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Charlie",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$CharlieDto",
+          "kind" : "mapper",
+          "via" : null,
+          "site" : "CharlieMapper.toDto(Charlie)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "CharlieResource.one",
+          "method" : "GET",
+          "path" : "/charlies",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$CharlieDto",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Delta",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$DeltaSummary",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "DeltaAssembler.all()"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$DeltaSummary",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "DeltaAssembler.summary(UUID)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "DeltaResource.summary",
+          "method" : "GET",
+          "path" : "/deltas",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$DeltaSummary",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Echo",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$EchoLive",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "EchoLive.of(Echo)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$EchoView",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$EchoLive",
+          "site" : "EchoView.from(EchoLive)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "EchoResource.live",
+          "method" : "GET",
+          "path" : "/echoes",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$EchoView",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Foxtrot",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$FoxtrotDto",
+          "kind" : "annotation",
+          "via" : null,
+          "site" : "@Exposes on FoxtrotDto"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "FoxtrotResource.get",
+          "method" : "GET",
+          "path" : "/foxtrots",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$FoxtrotDto",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Golf",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$GolfDto",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "GolfResource.get(UUID)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "GolfResource.get",
+          "method" : "GET",
+          "path" : "/golfs/{id}",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$GolfDto",
+          "kind" : "body"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Hotel",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelPage",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelRow",
+          "site" : "HotelPage.<init>(List, int)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelRow",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "HotelRow.from(Hotel)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "HotelResource.page",
+          "method" : "GET",
+          "path" : "/hotels",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelPage",
+          "kind" : "returns"
+        },
+        {
+          "operationId" : "HotelResource.page",
+          "method" : "GET",
+          "path" : "/hotels",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelRow",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$India",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$IndiaDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "IndiaDto.from(India)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "IndiaResource.create",
+          "method" : "POST",
+          "path" : "/indias",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$IndiaDto",
+          "kind" : "schema"
+        },
+        {
+          "operationId" : "IndiaResource.get",
+          "method" : "GET",
+          "path" : "/indias",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$IndiaDto",
+          "kind" : "schema"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Kilo",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KiloCount",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "KiloService.count()"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "KiloResource.count",
+          "method" : "GET",
+          "path" : "/kilos",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KiloCount",
+          "kind" : "returns"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Lima",
+      "table" : null,
+      "marking" : "technical",
+      "reason" : "n:n join of alphas and bravos",
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Mike",
+      "table" : null,
+      "marking" : "projection",
+      "reason" : null,
+      "projectionOf" : "qits-projects:Repository",
+      "knownGap" : null,
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$November",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Oscar",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : "qits-1945",
+      "dtos" : [ ],
+      "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",
+          "kind" : "direct",
+          "via" : null,
+          "site" : "PapaResource.list()"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "PapaResource.list",
+          "method" : "GET",
+          "path" : "/papas",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",
+          "kind" : "direct"
+        }
+      ]
+    }
+  ]
+}

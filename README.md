@@ -6,8 +6,8 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Claim checks for bearer tokens, and the one gate that turns machine enforcement on. A service authenticates only bearers. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, and provider-state coverage. |
-| `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, provider-state coverage, and entity exposure (every domain entity reaches an operation through a DTO, plus the checked-in map that shows how). |
+| `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. Plus the entity-exposure markers `@Technical`, `@Projection` and `@Exposes` that qits-arch-rules' `EntityExposureRules` reads. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
 | `qits-telemetry-core/` | `eu.wohlben.qits:qits-telemetry-core` | Telemetry export that carries a bearer: CDI `SpanExporter`/`LogRecordExporter`/`MetricExporter` beans on the upstream OTLP/HTTP builders, whose header supplier attaches the `qits` oidc client's current token on every export. |
@@ -227,6 +227,22 @@ outcomes a single-resource local transaction never produces — heuristics, XA.
 platform's CI step containers are Alpine running as one. That is a real hole rather than a hidden
 one: the wire proof runs on a developer host, the classifier's unit tests run everywhere, and this
 repo's release pipeline builds with `-DskipTests` in any case.
+
+## The entity-exposure markers
+
+`eu.wohlben.qits.db.exposure` holds three annotations with no behaviour and no dependency, read from
+bytecode by qits-arch-rules' `EntityExposureRules` (qits-1945). Every `@Entity` is a domain entity by
+default and must reach a JAX-RS operation through a DTO; these say where that does not apply, or
+where bytecode cannot show the path:
+
+| | |
+| --- | --- |
+| `@Technical(reason = "…")` | On an entity that is plumbing — an n:n join, a storage or outbox row, bookkeeping — not product data. The reason is required and must not be blank. |
+| `@Projection(of = "qits-projects:Repository")` | On an entity that is a local copy of another service's entity; `of` is `"<application>:<EntitySimpleName>"`. |
+| `@Exposes({Foo.class})` | On a DTO: the entities it carries, where the analysis cannot infer the link (reflection, a generic copier, a hand-written JSON column). Never on an entity. |
+
+All three are `RUNTIME`-retained and `TYPE`-targeted. They live here, not in qits-arch-rules, because
+they are main-scope code on a service's entities while the rules are a test-scope dependency.
 
 ## What it depends on, and why so little
 
@@ -476,6 +492,60 @@ pact-jvm and the fleet's pact version stays its own; the fixture mirror of
 `au.com.dius.pact.provider.junitsupport.State` in this module's test sources is where a pact-jvm
 rename would surface. The index is parsed with Jackson, a **provided** dependency every Quarkus
 consumer already has on its test classpath.
+
+## EntityExposureRules and the entity map
+
+Every `@Entity` is a **domain entity** by default and must reach at least one JAX-RS operation
+through a DTO, unless qits-db-core's `@Technical` or `@Projection` marks it, or the service lists it
+as a known gap with the ticket that will close it (qits-1945). One analysis,
+`EntityExposure.analyze(JavaClasses) → ExposureMap`, feeds both the rules and a checked-in JSON map:
+
+```java
+@AnalyzeClasses(packages = "eu.wohlben.qits.<service>",
+    importOptions = ImportOption.DoNotIncludeTests.class)
+class EntityExposureTest {
+  static final Set<String> KNOWN_GAPS = Set.of(); // "SimpleName qits-NNNN"
+
+  @ArchTest
+  static final ArchRule EXPOSED = EntityExposureRules.everyDomainEntityIsExposed(KNOWN_GAPS);
+
+  @ArchTest
+  static final ArchRule GAPS = EntityExposureRules.knownGapsAreReal(KNOWN_GAPS);
+
+  @ArchTest
+  static final ArchRule MARKERS = EntityExposureRules.markersAreWellFormed;
+
+  @ArchTest
+  static void map(JavaClasses classes) throws IOException {
+    EntityExposure.verify(classes, "qits-<service>", KNOWN_GAPS, Path.of("../docs/entities.json"));
+  }
+}
+```
+
+The analysis links an entity to a type by **factory** (a static method or constructor on the type
+reads the entity), **mapper** (a method with an entity parameter builds the type — a MapStruct
+interface's abstract method is enough), **assembler** (a method reads the entity some other way,
+Panache finders and `PanacheRepository<Foo>` calls included, and builds the type), **annotation**
+(`@Exposes` on the type), or **via** one carrier type in between. A type reaches an operation when
+the operation **returns** it (unwrapped through collections, `Optional`, `Uni`, `Multi`,
+`CompletionStage`, `RestResponse`, or held as a field of what is returned), when a `Response`
+operation's **body** news it, or when `@APIResponse(content = @Content(schema = @Schema(implementation
+= …)))` names it (**schema**); an operation returning the entity itself exposes it **direct**ly.
+The class javadoc of `EntityExposure` has the precise definitions.
+
+`everyDomainEntityIsExposed` fails an unmarked, unexposed, unlisted entity and names the three ways
+out. `knownGapsAreReal` fails a malformed entry and one that names no entity, a marked one, or one
+an operation now exposes. `markersAreWellFormed` fails a blank `@Technical` reason, a `@Projection.of`
+not shaped `<application>:<EntitySimpleName>`, both markers at once, either on a non-entity, and
+`@Exposes` on an entity. `EntityExposureRules.all(gaps)` folds the three into one rule.
+
+`EntityExposure.verify` renders the map — `formatVersion`, `application`, and per entity its table,
+marking, known gap, linked `dtos` (type, kind, via, site) and `operations` (operationId, method,
+path, dto, kind), all sorted, LF, trailing newline — and compares it with the file; a missing or
+different file fails with a diff. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
+instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
+real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
+rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.
 
 ---
 
