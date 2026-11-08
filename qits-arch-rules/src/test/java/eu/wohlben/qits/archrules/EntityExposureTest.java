@@ -2,6 +2,7 @@ package eu.wohlben.qits.archrules;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,13 +18,25 @@ import eu.wohlben.qits.archrules.ExposureMap.LinkKind;
 import eu.wohlben.qits.archrules.ExposureMap.Marking;
 import eu.wohlben.qits.archrules.ExposureMap.OperationKind;
 import eu.wohlben.qits.archrules.ExposureMap.OperationLink;
+import eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures;
+import eu.wohlben.qits.archrules.exposure.fixture.markers.MarkerFixtures;
+import eu.wohlben.qits.archrules.fixtures.entityless.EntitylessFixtures;
+import jakarta.ws.rs.GET;
+import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarOutputStream;
+import javax.tools.JavaCompiler;
+import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,12 +51,23 @@ class EntityExposureTest {
   private static final String LINKS = "eu.wohlben.qits.archrules.exposure.fixture.links";
   private static final String F = LINKS + ".LinkFixtures$";
 
-  private static final JavaClasses FIXTURES = new ClassFileImporter().importPackages(LINKS);
+  // Imported from a plain (never "-tests.jar") jar, not straight out of this module's own
+  // target/test-classes: these fixtures stand in for a service's production classes, and
+  // EntityExposure.isTestOutput (qits-1945) now skips anything actually under a test-classes
+  // directory — see FixtureImport's javadoc.
+  private static final JavaClasses FIXTURES = importFixtureJar(LINKS, LinkFixtures.class);
   private static final JavaClasses MARKERS =
-      new ClassFileImporter()
-          .importPackages("eu.wohlben.qits.archrules.exposure.fixture.markers");
+      importFixtureJar("eu.wohlben.qits.archrules.exposure.fixture.markers", MarkerFixtures.class);
   private static final JavaClasses ENTITYLESS =
-      new ClassFileImporter().importPackages("eu.wohlben.qits.archrules.fixtures.entityless");
+      importFixtureJar("eu.wohlben.qits.archrules.fixtures.entityless", EntitylessFixtures.class);
+
+  private static JavaClasses importFixtureJar(String packageName, Class<?> anchorInPackage) {
+    try (JarFile jarFile = new JarFile(FixtureImport.jarOf(packageName, anchorInPackage).toFile())) {
+      return new ClassFileImporter().importJar(jarFile);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
 
   private static final Set<String> GAPS = Set.of("Oscar qits-1945");
 
@@ -256,9 +280,110 @@ class EntityExposureTest {
   @Test
   void theAnalysisIsCachedPerImportAndIsDeterministic() {
     assertSame(MAP, EntityExposure.analyze(FIXTURES));
-    assertEquals(MAP, EntityExposure.analyze(new ClassFileImporter().importPackages(LINKS)));
+    assertEquals(MAP, EntityExposure.analyze(importFixtureJar(LINKS, LinkFixtures.class)));
     // A rule's condition receives a copy of the import, not the JavaClasses: still one analysis.
     assertSame(MAP, EntityExposure.analyzeCached(new ArrayList<>(FIXTURES)));
+  }
+
+  // --- classes from test output never take part ---------------------------------------------------
+
+  /**
+   * Reproduces qits-1945: {@code mvn verify} puts a sibling module's {@code -tests.jar} on the
+   * classpath alongside its {@code target/classes}, where {@code mvn test} never sees it. A class
+   * imported from such a jar must never take part — not even to add a brand-new operation row to an
+   * entity already exposed another way. {@code LeakyTestJarResource} is built fresh here (compiled
+   * with {@code javax.tools.ToolProvider} and packed into a real {@code fixture-1.0-tests.jar}) and
+   * would add exactly such a row to {@code Alpha} if {@code EntityExposure.isTestOutput} ever let it
+   * through. {@code FIXTURES} itself already comes from a plain jar, standing in for a service's own
+   * {@code target/classes} (see {@link FixtureImport}), so adding the {@code -tests.jar} alongside
+   * it — mirroring what {@code verify} puts on a real service's classpath — isolates exactly the
+   * {@code -tests.jar} exclusion: the analysis must render identically with or without it.
+   */
+  @Test
+  void classesFromATestJarNeverTakePartInTheAnalysis(@TempDir Path dir) throws Exception {
+    Path leakyJar = buildLeakyTestJar(dir);
+    Path plainJar = FixtureImport.jarOf(LINKS, LinkFixtures.class);
+
+    JavaClasses withJar;
+    try (JarFile plain = new JarFile(plainJar.toFile());
+        JarFile leaky = new JarFile(leakyJar.toFile())) {
+      withJar = new ClassFileImporter().importJars(plain, leaky);
+    }
+
+    String baseline = EntityExposure.render(MAP, "qits-fixture", GAPS);
+    String withLeak = EntityExposure.render(EntityExposure.analyze(withJar), "qits-fixture", GAPS);
+    assertEquals(baseline, withLeak, withLeak);
+  }
+
+  /**
+   * Compiles a tiny JAX-RS resource that reads {@code LinkFixtures.Alpha} and builds {@code
+   * LinkFixtures.AlphaDto} — a brand-new operation that, if imported, would add a new row to
+   * {@code Alpha}'s {@code operations} even though {@code AlphaDto} is already linked — and packs
+   * it into {@code <dir>/fixture-1.0-tests.jar}, the shape of a sibling module's test-jar.
+   */
+  private static Path buildLeakyTestJar(Path dir) throws IOException {
+    Path srcDir = dir.resolve("src");
+    Path classesDir = dir.resolve("classes");
+    Files.createDirectories(srcDir);
+    Files.createDirectories(classesDir);
+    Path sourceFile = srcDir.resolve("LeakyTestJarResource.java");
+    Files.writeString(
+        sourceFile,
+        """
+        package eu.wohlben.qits.archrules.exposure.fixture.testjar;
+
+        import eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures;
+        import jakarta.ws.rs.GET;
+        import jakarta.ws.rs.Path;
+        import java.util.UUID;
+
+        /** Would add a new operation and dto link to Alpha if it ever took part (qits-1945). */
+        @Path("/leaky")
+        public class LeakyTestJarResource {
+          @GET
+          public LinkFixtures.AlphaDto leak(UUID id) {
+            return LinkFixtures.AlphaDto.from(LinkFixtures.Alpha.findById(id));
+          }
+        }
+        """,
+        StandardCharsets.UTF_8);
+
+    String classpath =
+        String.join(File.pathSeparator, classpathEntryOf(LinkFixtures.class), classpathEntryOf(GET.class));
+    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+    assertNotNull(compiler, "no system java compiler available to build the test-jar fixture");
+    int result =
+        compiler.run(
+            null,
+            null,
+            null,
+            "-cp",
+            classpath,
+            "-d",
+            classesDir.toString(),
+            sourceFile.toString());
+    assertEquals(0, result, "javac failed to compile the test-jar fixture");
+
+    Path jar = dir.resolve("fixture-1.0-tests.jar");
+    try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+      try (var paths = Files.walk(classesDir)) {
+        for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+          String entryName = classesDir.relativize(path).toString().replace(File.separatorChar, '/');
+          out.putNextEntry(new JarEntry(entryName));
+          Files.copy(path, out);
+          out.closeEntry();
+        }
+      }
+    }
+    return jar;
+  }
+
+  private static String classpathEntryOf(Class<?> type) {
+    try {
+      return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
+    } catch (URISyntaxException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   // --- the rules ---------------------------------------------------------------------------------

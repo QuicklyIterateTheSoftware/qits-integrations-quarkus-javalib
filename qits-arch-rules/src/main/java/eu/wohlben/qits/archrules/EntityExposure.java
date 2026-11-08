@@ -19,6 +19,7 @@ import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.domain.JavaParameterizedType;
 import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.domain.JavaWildcardType;
+import com.tngtech.archunit.core.domain.Source;
 import com.tngtech.archunit.core.domain.AccessTarget.CodeUnitAccessTarget;
 import eu.wohlben.qits.archrules.ExposureMap.DtoLink;
 import eu.wohlben.qits.archrules.ExposureMap.EntityNode;
@@ -76,7 +77,13 @@ import java.util.stream.Collectors;
  * JavaClass.isEnum()}): a value like a status or a kind, never a carrier of entity data, so it can
  * be neither an entity→type link target, a via carrier, nor an operation row's {@code dto} — only
  * the enum class itself is excluded, never a type merely nested in one. <em>Imported</em> means in
- * the {@link JavaClasses} handed in: nothing from the JDK or a framework is ever a node.
+ * the {@link JavaClasses} handed in: nothing from the JDK or a framework is ever a node. Nor is a
+ * class from test output — one under a {@code test-classes} directory (Maven; Gradle and IntelliJ
+ * have their own layouts) or inside a sibling's {@code -tests.jar} test-jar — ever a node of any
+ * kind, entity included: {@link #isTestOutput} skips it regardless of the {@code ImportOption} the
+ * caller's {@code @AnalyzeClasses} passes, because {@code ImportOption.DoNotIncludeTests} only
+ * recognizes its own build tool's test-output layout, never a dependency's test-jar that `verify`
+ * (unlike `test`) puts on the classpath (qits-1945).
  *
  * <p><b>Reads and builds.</b> A code unit <em>reads</em> a type when it takes it as a parameter
  * (raw, or as the argument of a {@code Collection}, {@code List}, {@code Set}, {@code Optional},
@@ -489,6 +496,10 @@ public final class EntityExposure {
 
     Analysis(Iterable<JavaClass> classes) {
       for (JavaClass clazz : classes) {
+        if (isTestOutput(clazz)) {
+          // Never a node of any kind — see the class javadoc and isTestOutput (qits-1945).
+          continue;
+        }
         imported.put(clazz.getName(), clazz);
       }
     }
@@ -962,6 +973,36 @@ public final class EntityExposure {
       }
       // A type variable says nothing the bytecode can name; its bound is usually Object.
     }
+  }
+
+  /**
+   * Whether {@code clazz} was imported from test output: a {@code test-classes} directory (Maven;
+   * {@code /build/classes/java/test/} or {@code /build/classes/kotlin/test/} for Gradle, mirroring
+   * {@code ImportOption.DoNotIncludeTests}), or a jar whose file name ends {@code -tests.jar} — the
+   * test-jar a sibling module publishes for its own tests, which {@code verify}/{@code package} (but
+   * not {@code test}) puts on a consuming module's classpath. Such a class never takes part in the
+   * analysis — not as an entity, an operation, a candidate DTO or carrier, or a {@code via} hop —
+   * whatever {@code ImportOption} the caller's own {@code @AnalyzeClasses} passes (qits-1945), so the
+   * gate and the map stay the same under {@code mvn test} and {@code mvn verify}. A class with no
+   * source at all (e.g. one ArchUnit synthesized) is kept.
+   */
+  static boolean isTestOutput(JavaClass clazz) {
+    return clazz.getSource().map(EntityExposure::isTestOutput).orElse(false);
+  }
+
+  private static boolean isTestOutput(Source source) {
+    String uri = source.getUri().toString();
+    if (uri.contains("/test-classes/")
+        || uri.contains("/build/classes/java/test/")
+        || uri.contains("/build/classes/kotlin/test/")) {
+      return true;
+    }
+    // A jar entry's URI looks like jar:file:/path/to/name-tests.jar!/pkg/Clazz.class; take the
+    // file name of the part before the first '!' and check its name, not merely "contains".
+    int bang = uri.indexOf('!');
+    String jarPart = bang >= 0 ? uri.substring(0, bang) : uri;
+    String fileName = jarPart.substring(jarPart.lastIndexOf('/') + 1);
+    return fileName.endsWith("-tests.jar");
   }
 
   static Optional<String> verb(JavaMethod method) {

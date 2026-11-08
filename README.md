@@ -541,7 +541,13 @@ operations either), and primary-key classes: whatever an entity's `@IdClass` nam
 built from every row and read by every lookup, so as a carrier it would link anything to anything.
 Nor is an enum class (`JavaClass.isEnum()`): a value like a status or a kind, never a carrier of
 entity data, so it can be neither an entity→type link target, a via carrier, nor an operation row's
-`dto` — only the enum class itself is excluded, never a type merely nested in one.
+`dto` — only the enum class itself is excluded, never a type merely nested in one. Nor are classes
+from test output — test-classes directories and `-tests.jar` test-jars — never take part, whatever
+import options the caller passes: `mvn verify`/`package` puts a sibling module's `-tests.jar` (its
+`<artifact>-<version>-tests.jar`, consumed by this module's own tests) on the classpath alongside
+its `target/classes`, where `mvn test` only sees `target/classes`; `ImportOption.DoNotIncludeTests`
+recognizes its own build's `test-classes` layout but not a dependency's test-jar, so without this
+exclusion a service's map and gate would differ between `test` and `verify` (qits-1945).
 
 Two known limits, both lenient: a **body** link counts anything an operation's body builds or gets
 back from a call, an authentication lookup included; and only JAX-RS doors are seen, so an entity
