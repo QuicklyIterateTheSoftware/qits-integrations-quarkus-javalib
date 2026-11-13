@@ -124,6 +124,8 @@ public final class ExposureMap {
    * @param dto the best-by-kind linked type the operation hands out
    * @param kind how it hands {@code dto} out
    * @param cardinality whether the answer carries one or several of the entity's data; never null
+   * @param offline whether qits-offline-core's {@code @OfflineCapable} is on the operation or its
+   *     class (qits-2148); the JSON map writes {@code "offline": true} only where it is
    */
   public record OperationLink(
       String operationId,
@@ -131,7 +133,19 @@ public final class ExposureMap {
       String path,
       String dto,
       OperationKind kind,
-      Cardinality cardinality) {
+      Cardinality cardinality,
+      boolean offline) {
+
+    /** A row of an operation that is not offline-capable, as every row was before qits-2148. */
+    public OperationLink(
+        String operationId,
+        String method,
+        String path,
+        String dto,
+        OperationKind kind,
+        Cardinality cardinality) {
+      this(operationId, method, path, dto, kind, cardinality, false);
+    }
     static final Comparator<OperationLink> ORDER =
         Comparator.comparing(OperationLink::operationId)
             .thenComparing(OperationLink::method)

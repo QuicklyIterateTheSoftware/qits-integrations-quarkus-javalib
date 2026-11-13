@@ -11,7 +11,7 @@
 
          EVERY TYPE THE RULES JUDGE IS NAMED AS A STRING, never as a dependency. The rules reason
          about jakarta.persistence, jakarta.ws.rs, MicroProfile OpenAPI, qits-eventstream, qits-db-core,
-         qits-http-core, quarkus-junit5 and pact-jvm types, and depending on any
+         qits-http-core, qits-offline-core, quarkus-junit5 and pact-jvm types, and depending on any
          of them would (a) need the platform Maven registry, breaking the clone-alone build rule,
          and (b) couple this module's version to somebody else's for no runtime gain — ArchUnit
          reads bytecode, and bytecode carries names. quarkus-junit5, which TestProfileBudgetRules

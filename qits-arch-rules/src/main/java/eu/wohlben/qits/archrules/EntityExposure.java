@@ -117,7 +117,8 @@ import java.util.stream.Collectors;
  *
  * <p><b>Type → operation links.</b> An operation hands out a type when its return type, unwrapped
  * through {@code List}/{@code Set}/{@code Collection}/{@code Optional}/{@code Uni}/{@code
- * Multi}/{@code CompletionStage}/{@code RestResponse}, is the type (<b>returns</b>); when that
+ * Multi}/{@code CompletionStage}/{@code RestResponse}/qits-offline-core's {@code ChangesPage}, is
+ * the type (<b>returns</b>); when that
  * unwraps to nothing imported — a {@code Response}, a raw {@code RestResponse}, {@code void} — and
  * its own body news the type or calls a method returning it, one level deep (<b>body</b>; an
  * entity counts here only when the body news it, since finding a row to map is what every body
@@ -143,8 +144,10 @@ import java.util.stream.Collectors;
  *
  * <p><b>Cardinality.</b> Each row also says whether the answer carries several of the entity's
  * data ({@code collection}) or one ({@code single}). A hop through {@code Collection}/{@code
- * List}/{@code Set}/{@code Stream}/{@code Iterable}, a map's value, {@code Multi} or an array is
- * plural; {@code Optional}, {@code Uni}, {@code CompletionStage} and {@code RestResponse} are not.
+ * List}/{@code Set}/{@code Stream}/{@code Iterable}, a map's value, {@code Multi}, an array or
+ * qits-offline-core's {@code eu.wohlben.qits.offline.ChangesPage} is plural — {@code ChangesPage<T>}
+ * is unwrapped to its type argument like a {@code List<T>}, a page of {@code T}s whatever its
+ * {@code nextCursor} field (qits-2148), and is never a node itself; {@code Optional}, {@code Uni}, {@code CompletionStage} and {@code RestResponse} are not.
  * A <em>transparent</em> type is a pure wrapper: an imported non-entity whose instance fields hold
  * imported types — at least one does — or are primitives, boxed numbers or booleans, and nothing
  * else ({@code WorkBriefs(List<WorkBrief>)}, {@code Page(List<Row> rows, int total)}, {@code
@@ -173,11 +176,19 @@ import java.util.stream.Collectors;
  *   <li>A wrapper carrying anything but what it holds and counts — a {@code String} cursor, an
  *       enum, a timestamp — is not transparent: {@code Page(List<Row> rows, String cursor)} counts
  *       as data of its own at the depth it is returned, so where it is linked to the entity it
- *       reads as {@code single} though it is a page.
+ *       reads as {@code single} though it is a page. qits-offline-core's {@code ChangesPage} is the
+ *       one cursor page known by name, and reads as {@code collection}.
  *   <li>Only JAX-RS doors are seen. Vert.x {@code Router} routes, {@code @Route} methods, WebSocket
  *       endpoints and any other non-JAX-RS door are invisible, so an entity handed out only there
  *       reads as unexposed; mark it, or list it as a known gap.
  * </ul>
+ *
+ * <p><b>Offline operations.</b> A row whose operation, or the operation's class, carries
+ * qits-offline-core's {@code eu.wohlben.qits.offline.OfflineCapable} records {@code "offline":
+ * true} after its {@code cardinality} (several overloads sharing a row: when any of them does).
+ * Every other row has no {@code offline} key at all, so a map with no offline operation renders
+ * exactly the bytes it did before the key existed and {@link #FORMAT_VERSION} stays 2 (qits-2148).
+ * {@link OfflineCapableRules} holds such operations to the offline conventions.
  *
  * <p><b>The map.</b> {@link #verify} renders the analysis as JSON and compares it with a file the
  * service keeps in its repository, failing with a diff when they disagree; {@code
@@ -238,6 +249,16 @@ public final class EntityExposure {
   static final String API_RESPONSES =
       "org.eclipse.microprofile.openapi.annotations.responses.APIResponses";
 
+  /** qits-offline-core's opt-in, on an operation or its class (qits-2148). */
+  static final String OFFLINE_CAPABLE = "eu.wohlben.qits.offline.OfflineCapable";
+
+  /**
+   * qits-offline-core's changed-since answer, {@code ChangesPage<T>(List<T> items, List<Tombstone>
+   * deleted, String nextCursor, boolean hasMore)}: a page of {@code T}s, so a pure, plural wrapper
+   * over its type argument despite the cursor it carries (qits-2148).
+   */
+  static final String CHANGES_PAGE = "eu.wohlben.qits.offline.ChangesPage";
+
   /** The HTTP-method annotations, to the verb each one is. */
   static final Map<String, String> HTTP_METHODS;
 
@@ -264,7 +285,8 @@ public final class EntityExposure {
           "java.lang.Iterable",
           MAP,
           "java.util.SortedMap",
-          "java.util.NavigableMap");
+          "java.util.NavigableMap",
+          CHANGES_PAGE);
 
   /** {@link #CONTAINERS}, plus the asynchronous and response wrappers an operation returns. */
   static final Set<String> RESPONSE_WRAPPERS;
@@ -300,7 +322,21 @@ public final class EntityExposure {
           MAP,
           "java.util.SortedMap",
           "java.util.NavigableMap",
-          "io.smallrye.mutiny.Multi");
+          "io.smallrye.mutiny.Multi",
+          CHANGES_PAGE);
+
+  /**
+   * The wrappers an answer is looked through to what it answers without becoming several of it:
+   * {@link #RESPONSE_WRAPPERS} less {@link #PLURAL} — {@code Optional}, {@code Uni}, {@code
+   * CompletionStage}, {@code CompletableFuture}, {@code RestResponse}.
+   */
+  static final Set<String> SINGLE_WRAPPERS;
+
+  static {
+    Set<String> single = new HashSet<>(RESPONSE_WRAPPERS);
+    single.removeAll(PLURAL);
+    SINGLE_WRAPPERS = Set.copyOf(single);
+  }
 
   /**
    * The non-primitive field types a transparent wrapper may carry beside what it holds: a count, a
@@ -503,6 +539,10 @@ public final class EntityExposure {
         operation.put("dto", link.dto());
         operation.put("kind", link.kind().wire());
         operation.put("cardinality", link.cardinality().wire());
+        if (link.offline()) {
+          // Only on offline rows: a map without any stays byte-identical to format version 2's.
+          operation.put("offline", true);
+        }
       }
     }
     DefaultIndenter lf = new DefaultIndenter("  ", "\n");
@@ -1052,6 +1092,7 @@ public final class EntityExposure {
       // and per row in `rowTypes`, for the row's cardinality.
       Map<List<String>, OperationLink> operationLinks = new HashMap<>();
       Map<List<String>, List<Map.Entry<String, Reached>>> rowTypes = new HashMap<>();
+      Map<List<String>, Boolean> rowOffline = new HashMap<>();
       Set<String> reaching = new TreeSet<>();
       for (Map.Entry<JavaMethod, Map<String, Reached>> entry : exposed.entrySet()) {
         JavaMethod operation = entry.getKey();
@@ -1073,6 +1114,8 @@ public final class EntityExposure {
             continue;
           }
           reaching.add(dto);
+          // Overloads sharing a row: the row is offline when any of them is.
+          rowOffline.merge(row, offline(operation), Boolean::logicalOr);
           rowTypes
               .computeIfAbsent(row, r -> new ArrayList<>())
               .add(Map.entry(dto, type.getValue()));
@@ -1095,7 +1138,8 @@ public final class EntityExposure {
                 link.path(),
                 link.dto(),
                 link.kind(),
-                cardinality(rowTypes.get(row.getKey()), byType)));
+                cardinality(rowTypes.get(row.getKey()), byType),
+                rowOffline.getOrDefault(row.getKey(), false)));
       }
       // The map keeps what reaches an operation: per type, its most direct link; a via link's
       // carrier is on the path too, so it keeps its own best link beside it.
@@ -1276,6 +1320,49 @@ public final class EntityExposure {
       }
     }
     return Optional.empty();
+  }
+
+  /**
+   * Whether qits-offline-core's {@code @OfflineCapable} is on the operation or on its declaring
+   * class (qits-2148).
+   */
+  static boolean offline(JavaMethod operation) {
+    return operation.isAnnotatedWith(OFFLINE_CAPABLE)
+        || operation.getOwner().isAnnotatedWith(OFFLINE_CAPABLE);
+  }
+
+  /**
+   * What an answer of this type answers, looked through {@link #SINGLE_WRAPPERS} and wildcard
+   * bounds the way the cardinality looks through them: {@code Uni<RestResponse<List<Dto>>>} gives
+   * {@code List<Dto>}. A raw wrapper ({@code RestResponse} with no argument) is returned as is.
+   */
+  static JavaType answered(JavaType type) {
+    JavaType current = type;
+    for (int depth = 0; depth <= 8; depth++) {
+      if (current instanceof JavaParameterizedType parameterized
+          && SINGLE_WRAPPERS.contains(parameterized.toErasure().getName())
+          && parameterized.getActualTypeArguments().size() == 1) {
+        current = parameterized.getActualTypeArguments().get(0);
+      } else if (current instanceof JavaWildcardType wildcard
+          && wildcard.getUpperBounds().size() == 1) {
+        current = wildcard.getUpperBounds().get(0);
+      } else {
+        break;
+      }
+    }
+    return current;
+  }
+
+  /**
+   * Whether an {@link #answered} type is several of something: an array, or one of {@link
+   * #PLURAL} — a collection, a stream, a map, {@code Multi}, a {@code ChangesPage}.
+   */
+  static boolean plural(JavaType type) {
+    if (type instanceof JavaGenericArrayType) {
+      return true;
+    }
+    JavaClass raw = type.toErasure();
+    return raw.isArray() || PLURAL.contains(raw.getName());
   }
 
   static String operationId(JavaMethod operation) {

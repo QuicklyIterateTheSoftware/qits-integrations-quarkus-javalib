@@ -6,7 +6,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Claim checks for bearer tokens, and the one gate that turns machine enforcement on. A service authenticates only bearers. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, provider-state coverage, and entity exposure (every domain entity reaches an operation through a DTO, plus the checked-in map that shows how). |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, the HttpClient wrapping rule, the desk-admin parity rule, the test-profile budget, the datasource baseline, provider-state coverage, entity exposure (every domain entity reaches an operation through a DTO, plus the checked-in map that shows how), and the offline conventions for `@OfflineCapable` operations. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. Plus the entity-exposure markers `@Technical`, `@Projection` and `@Exposes` that qits-arch-rules' `EntityExposureRules` reads. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
@@ -529,7 +529,8 @@ interface's abstract method is enough), **assembler** (a method reads the entity
 Panache finders and `PanacheRepository<Foo>` calls included, and builds the type), **annotation**
 (`@Exposes` on the type), or **via** one carrier type in between. A type reaches an operation when
 the operation **returns** it (unwrapped through collections, `Optional`, `Uni`, `Multi`,
-`CompletionStage`, `RestResponse`, or held as a field of what is returned), when a `Response`
+`CompletionStage`, `RestResponse`, qits-offline-core's `ChangesPage`, or held as a field of what is
+returned), when a `Response`
 operation's **body** news it, or when `@APIResponse(content = @Content(schema = @Schema(implementation
 = …)))` names it (**schema**); an operation returning the entity itself exposes it **direct**ly.
 The class javadoc of `EntityExposure` has the precise definitions.
@@ -571,16 +572,60 @@ unexposed entity records `dtos: []`. `operations` holds **one row per (operation
 where several of the entity's DTOs reach the same operation, `dto` is the best one by kind,
 `direct > returns > schema > body`, ties broken by `dto` FQN lexicographically, and `kind` is that
 row's kind. `cardinality` says whether the answer carries several of the entity's data
-(`collection`: a `List`, array, `Multi`, map values, a page of its rows, a `@Schema(type = ARRAY)`)
+(`collection`: a `List`, array, `Multi`, map values, a page of its rows, a `ChangesPage<T>`, a
+`@Schema(type = ARRAY)`)
 or one (`single`), decided over every type of the entity's reaching the row less the transparent
 ones — pure wrappers whose fields hold imported types beside at most primitives, boxed numbers and
 booleans (`Page(List<Row> rows, int total)`), looked through at no depth cost — then less, in turn,
 any `via`-linked type where another kind is left (`via` is the weakest evidence: a type reached
 only through a carrier) — the shallowest field depth first, then the most direct link kind (format
-version 2); a wrapper carrying a `String` such as a cursor is not transparent. `-Dgolden.update=true` (or
+version 2); a wrapper carrying a `String` such as a cursor is not transparent — except
+qits-offline-core's `eu.wohlben.qits.offline.ChangesPage`, known by name and unwrapped to its type
+argument like a `List`, so a changed-since read maps as `collection` despite its `nextCursor`. A row
+whose operation, or the operation's class, carries `@OfflineCapable` also records `"offline": true`
+after its `cardinality`; every other row has **no** `offline` key at all, so a map without offline
+operations renders the same bytes it did before the key existed and the format version stays 2
+(qits-2148). `-Dgolden.update=true` (or
 `QITS_GOLDEN_UPDATE=true`) writes it instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
 real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
 rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.
+
+## OfflineCapableRules
+
+Holds a service's offline operations — qits-offline-core's `@OfflineCapable` on a JAX-RS `@GET`,
+`@POST`, `@PUT`, `@PATCH` or `@DELETE` method, or on its class — to the conventions an offline
+client relies on (qits-2148). An operation's answer is its return type looked through `Uni`,
+`RestResponse`, `CompletionStage` and `Optional`, as the entity map's cardinality looks through them:
+
+- `updatesTakeIfMatch()`: a `PUT`, `PATCH` or `DELETE` takes an `@HeaderParam("If-Match")`
+  parameter, for `RecordVersions.require`. A `POST` create needs none; `Idempotency-Key` covers it.
+- `collectionReadsTakeSince()`: a `GET` never answers a collection, array, map or `Multi`; it answers
+  `ChangesPage<T>`, and then takes `@QueryParam("since")`.
+- `readsAnswerOfflineRecords()`: what a `GET` answers, or `ChangesPage`'s type argument, implements
+  `OfflineRecord`.
+- `operationsCarryOfflineMark()`: the method carries `@Extension(name = "x-qits-offline", value =
+  "true")`, directly or inside `@Extensions` — MicroProfile OpenAPI does not read
+  `@OfflineCapable`, and the exported OpenAPI is where the PWA lint rules look.
+
+A `GET` answering a raw `Response` names no type in its bytecode, so the two read rules let it pass.
+Every rule allows an empty selection, so a service with no offline operation passes, and each
+message names the method as `Owner.method(ParamSimpleNames)`:
+
+```java
+@AnalyzeClasses(packages = "eu.wohlben.qits.<service>",
+    importOptions = ImportOption.DoNotIncludeTests.class)
+class OfflineCapableTest {
+  @ArchTest static final ArchRule IF_MATCH = OfflineCapableRules.updatesTakeIfMatch();
+  @ArchTest static final ArchRule SINCE = OfflineCapableRules.collectionReadsTakeSince();
+  @ArchTest static final ArchRule RECORDS = OfflineCapableRules.readsAnswerOfflineRecords();
+  @ArchTest static final ArchRule MARK = OfflineCapableRules.operationsCarryOfflineMark();
+}
+```
+
+`OfflineCapableRules.all()` folds the four into one rule. qits-offline-core's types are matched **by
+name**, so this module does not depend on it; the fixture mirror of `OfflineCapable`,
+`OfflineRecord`, `ChangesPage` and `Tombstone` in this module's test sources is where a rename
+surfaces.
 
 ---
 
