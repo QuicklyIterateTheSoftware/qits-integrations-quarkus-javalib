@@ -12,7 +12,8 @@ import java.util.TreeSet;
  * reaches and the operations those types reach (qits-1945). Immutable, and sorted the way the JSON
  * map is rendered — entities by fully-qualified name, each entity's {@link DtoLink}s by (type,
  * kind, site), its {@link OperationLink}s by (operationId, method, path, dto) — so two analyses of
- * the same bytecode are equal and render the same bytes.
+ * the same bytecode are equal and render the same bytes. Each operation row also says whether the
+ * answer carries one or several of the entity's data ({@link Cardinality}).
  *
  * <p>The map is the evidence the rules judge and the document a reviewer reads: the rules in
  * {@link EntityExposureRules} only ask whether {@link EntityNode#operations()} is empty, which the
@@ -75,6 +76,22 @@ public final class ExposureMap {
   }
 
   /**
+   * Whether an operation's answer carries one or several of an entity's data. See {@link
+   * EntityExposure}, "Cardinality".
+   */
+  public enum Cardinality {
+    /** One: a detail, a lookup, a summary, or a page of something else. */
+    SINGLE,
+    /** Several: a list, an array, a stream, a map's values, or a page of the entity's rows. */
+    COLLECTION;
+
+    /** The lower-case spelling the JSON map uses. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+  }
+
+  /**
    * One link from an entity to a type.
    *
    * @param type the linked type's fully-qualified name (the entity's own for {@link
@@ -96,7 +113,9 @@ public final class ExposureMap {
    * One operation that hands out an entity's linked types, one row per (operationId, method,
    * path): where several of the entity's DTOs reach it, {@code dto} is the best one by kind
    * ({@code direct > returns > schema > body}), ties broken by {@code dto} FQN lexicographically,
-   * and {@code kind} is that row's kind.
+   * and {@code kind} is that row's kind. {@code cardinality} belongs to the row, not to the kept
+   * {@code dto}: it is decided over every type of the entity's that reaches the operation (see
+   * {@link EntityExposure}, "Cardinality").
    *
    * @param operationId {@code @Operation(operationId)} if set, else {@code
    *     "<DeclaringSimpleName>.<method>"}
@@ -104,9 +123,15 @@ public final class ExposureMap {
    * @param path the class {@code @Path} and the method {@code @Path} joined, as written
    * @param dto the best-by-kind linked type the operation hands out
    * @param kind how it hands {@code dto} out
+   * @param cardinality whether the answer carries one or several of the entity's data; never null
    */
   public record OperationLink(
-      String operationId, String method, String path, String dto, OperationKind kind) {
+      String operationId,
+      String method,
+      String path,
+      String dto,
+      OperationKind kind,
+      Cardinality cardinality) {
     static final Comparator<OperationLink> ORDER =
         Comparator.comparing(OperationLink::operationId)
             .thenComparing(OperationLink::method)
@@ -128,7 +153,8 @@ public final class ExposureMap {
    *     direct — plus a {@code via} link's carrier; sorted. Empty for an unexposed entity: links
    *     that reach nothing are not recorded (see {@link EntityExposure}, "What the map keeps")
    * @param operations the operations those types reach, one row per (operationId, method, path)
-   *     naming the best-by-kind dto; sorted. Empty exactly when the entity is unexposed
+   *     naming the best-by-kind dto and the row's cardinality; sorted. Empty exactly when the
+   *     entity is unexposed
    */
   public record EntityNode(
       String entity,

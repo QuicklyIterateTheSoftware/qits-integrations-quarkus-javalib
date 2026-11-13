@@ -11,6 +11,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaCodeUnitAccess;
+import com.tngtech.archunit.core.domain.JavaEnumConstant;
 import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaFieldAccess;
 import com.tngtech.archunit.core.domain.JavaGenericArrayType;
@@ -21,6 +22,7 @@ import com.tngtech.archunit.core.domain.JavaType;
 import com.tngtech.archunit.core.domain.JavaWildcardType;
 import com.tngtech.archunit.core.domain.Source;
 import com.tngtech.archunit.core.domain.AccessTarget.CodeUnitAccessTarget;
+import eu.wohlben.qits.archrules.ExposureMap.Cardinality;
 import eu.wohlben.qits.archrules.ExposureMap.DtoLink;
 import eu.wohlben.qits.archrules.ExposureMap.EntityNode;
 import eu.wohlben.qits.archrules.ExposureMap.LinkKind;
@@ -139,6 +141,19 @@ import java.util.stream.Collectors;
  * DTO. An unexposed entity therefore records {@code dtos = []}: what it links to reaches nothing,
  * which is the finding, and the rest is noise a reviewer cannot act on.
  *
+ * <p><b>Cardinality.</b> Each row also says whether the answer carries several of the entity's
+ * data ({@code collection}) or one ({@code single}). A hop through {@code Collection}/{@code
+ * List}/{@code Set}/{@code Stream}/{@code Iterable}, a map's value, {@code Multi} or an array is
+ * plural; {@code Optional}, {@code Uni}, {@code CompletionStage} and {@code RestResponse} are not.
+ * Every reached type carries its depth (0 for a root, one more per field hop) and whether its
+ * shallowest path crossed a plural hop — a {@code body} construction and a {@code schema} are
+ * single roots, unless that {@code @Schema} says {@code type = SchemaType.ARRAY}. The row looks at
+ * the entity's types that reach the operation, keeps those whose own best link is the most direct
+ * kind among them, then the shallowest, and is a collection when any of those is plural. Decided
+ * per row, not per kept {@code dto}: a page wrapper linked by assembler or via loses to the item
+ * DTO its list carries, so the page is a collection; a detail DTO at depth 0 beats the child-list
+ * DTO at depth 1 it holds, so the detail is single.
+ *
  * <p><b>Known limits.</b> The rule errs lenient, never strict, where bytecode cannot tell:
  *
  * <ul>
@@ -191,7 +206,7 @@ import java.util.stream.Collectors;
 public final class EntityExposure {
 
   /** The JSON map's format version; a change in its shape changes this. */
-  public static final int FORMAT_VERSION = 1;
+  public static final int FORMAT_VERSION = 2;
 
   static final String ENTITY = "jakarta.persistence.Entity";
   static final String TABLE = "jakarta.persistence.Table";
@@ -257,6 +272,27 @@ public final class EntityExposure {
       Set.of(MAP, "java.util.SortedMap", "java.util.NavigableMap");
 
   /**
+   * The wrappers whose crossing makes what they hold plural — several of it in one answer. An
+   * array is plural too; {@code Optional} and the asynchronous and response wrappers are not.
+   */
+  static final Set<String> PLURAL =
+      Set.of(
+          "java.util.Collection",
+          "java.util.List",
+          "java.util.Set",
+          "java.util.SortedSet",
+          "java.util.NavigableSet",
+          "java.util.stream.Stream",
+          "java.lang.Iterable",
+          MAP,
+          "java.util.SortedMap",
+          "java.util.NavigableMap",
+          "io.smallrye.mutiny.Multi");
+
+  /** {@code @Schema(type = SchemaType.ARRAY)}: the schema describes several of its type. */
+  static final String SCHEMA_TYPE = "org.eclipse.microprofile.openapi.annotations.enums.SchemaType";
+
+  /**
    * One analysis per import. ArchUnit hands a rule's condition a fresh copy of the imported classes,
    * never the {@link JavaClasses} the {@code @ArchTest} method receives, so the key cannot be the
    * collection. It is the import's first class by name — a {@link JavaClass} belongs to exactly one
@@ -270,18 +306,19 @@ public final class EntityExposure {
 
   private static final Pattern GAP = Pattern.compile(EntityExposureRules.KNOWN_GAP_PATTERN);
 
+  /** The link kinds, most direct first. */
+  private static final List<LinkKind> LINK_KIND_ORDER =
+      List.of(
+          LinkKind.DIRECT,
+          LinkKind.ANNOTATION,
+          LinkKind.FACTORY,
+          LinkKind.MAPPER,
+          LinkKind.ASSEMBLER,
+          LinkKind.VIA);
+
   /** The most direct link first: direct, annotation, factory, mapper, assembler, via; then site. */
   static final Comparator<DtoLink> LINK_PRECEDENCE =
-      Comparator.comparingInt(
-              (DtoLink link) ->
-                  List.of(
-                          LinkKind.DIRECT,
-                          LinkKind.ANNOTATION,
-                          LinkKind.FACTORY,
-                          LinkKind.MAPPER,
-                          LinkKind.ASSEMBLER,
-                          LinkKind.VIA)
-                      .indexOf(link.kind()))
+      Comparator.comparingInt((DtoLink link) -> LINK_KIND_ORDER.indexOf(link.kind()))
           .thenComparing(DtoLink::site)
           .thenComparing(link -> link.via() == null ? "" : link.via());
 
@@ -430,6 +467,7 @@ public final class EntityExposure {
         operation.put("path", link.path());
         operation.put("dto", link.dto());
         operation.put("kind", link.kind().wire());
+        operation.put("cardinality", link.cardinality().wire());
       }
     }
     DefaultIndenter lf = new DefaultIndenter("  ", "\n");
@@ -490,9 +528,8 @@ public final class EntityExposure {
     /** Source type (entity or candidate) to the links leaving it. */
     private final Map<String, Set<DtoLink>> links = new HashMap<>();
 
-    /** Operation to the types it hands out, each with the ways it does. */
-    private final Map<JavaMethod, Map<String, Set<OperationKind>>> exposed =
-        new LinkedHashMap<>();
+    /** Operation to the types it hands out, each with the ways it does, its depth and plurality. */
+    private final Map<JavaMethod, Map<String, Reached>> exposed = new LinkedHashMap<>();
 
     Analysis(Iterable<JavaClass> classes) {
       for (JavaClass clazz : classes) {
@@ -749,76 +786,125 @@ public final class EntityExposure {
 
     // --- type → operation ----------------------------------------------------------------------
 
-    private Map<String, Set<OperationKind>> handedOut(JavaMethod operation) {
-      Map<String, Set<OperationKind>> types = new TreeMap<>();
-      Set<String> returned = importedNames(List.of(operation.getReturnType()), RESPONSE_WRAPPERS);
+    /**
+     * How an operation reaches a type: the ways it does, the shallowest depth it does at (0 for a
+     * root, one more per field hop), and whether a path at that depth crossed a plural hop.
+     */
+    private record Reached(Set<OperationKind> kinds, int depth, boolean plural) {
+
+      /** Kinds united; the shallower depth wins, and at the same depth plurality is OR'd. */
+      Reached merge(Reached other) {
+        Set<OperationKind> union = new LinkedHashSet<>(kinds);
+        union.addAll(other.kinds);
+        int shallowest = Math.min(depth, other.depth);
+        boolean anyPlural =
+            (depth == shallowest && plural) || (other.depth == shallowest && other.plural);
+        return new Reached(union, shallowest, anyPlural);
+      }
+    }
+
+    private Map<String, Reached> handedOut(JavaMethod operation) {
+      Map<String, Reached> types = new TreeMap<>();
+      Map<String, Boolean> returned =
+          importedPlurality(List.of(operation.getReturnType()), RESPONSE_WRAPPERS);
       if (!returned.isEmpty()) {
         reach(returned, OperationKind.RETURNS, types);
       } else {
-        Set<String> bodyRoots = new HashSet<>();
+        // A construction is one of its type; a call's return type is plural as it unwraps. The
+        // access only carries the erased descriptor (a bare List), so an imported callee is
+        // resolved for its declared, generic return type (List<Dto>).
+        Map<String, Boolean> bodyRoots = new HashMap<>();
         for (JavaCodeUnitAccess<?> construction : constructions(operation)) {
-          bodyRoots.add(construction.getTargetOwner().getName());
+          bodyRoots.merge(construction.getTargetOwner().getName(), false, Boolean::logicalOr);
         }
         List<JavaCodeUnitAccess<?>> calls = new ArrayList<>(operation.getMethodCallsFromSelf());
         calls.addAll(operation.getMethodReferencesFromSelf());
         for (JavaCodeUnitAccess<?> call : calls) {
-          for (String type :
-              importedNames(List.of(call.getTarget().getReturnType()), RESPONSE_WRAPPERS)) {
+          CodeUnitAccessTarget target = call.getTarget();
+          JavaType callReturn =
+              target
+                  .resolveMember()
+                  .<JavaType>map(JavaCodeUnit::getReturnType)
+                  .orElse(target.getReturnType());
+          for (Map.Entry<String, Boolean> type :
+              importedPlurality(List.of(callReturn), RESPONSE_WRAPPERS).entrySet()) {
             // A body finds the row it maps; only a body that news an entity hands it out.
-            if (!entities.contains(type)) {
-              bodyRoots.add(type);
+            if (!entities.contains(type.getKey())) {
+              bodyRoots.merge(type.getKey(), type.getValue(), Boolean::logicalOr);
             }
           }
         }
-        bodyRoots.retainAll(imported.keySet());
-        bodyRoots.removeAll(operationClasses);
+        bodyRoots.keySet().retainAll(imported.keySet());
+        bodyRoots.keySet().removeAll(operationClasses);
         reach(bodyRoots, OperationKind.BODY, types);
       }
       reach(schemaImplementations(operation), OperationKind.SCHEMA, types);
       return types;
     }
 
-    /** Adds the roots and every imported type they hold as instance fields, transitively. */
-    private void reach(Set<String> roots, OperationKind kind, Map<String, Set<OperationKind>> out) {
+    /**
+     * Adds the roots (each to whether it is plural) and every imported type they hold as instance
+     * fields, transitively, level by level: a type keeps the shallowest depth it is reached at, and
+     * is plural there when any path of that depth crossed a plural hop, the root's own included.
+     */
+    private void reach(Map<String, Boolean> roots, OperationKind kind, Map<String, Reached> out) {
       Set<String> seen = new HashSet<>();
-      Deque<String> queue = new ArrayDeque<>(new TreeSet<>(roots));
-      while (!queue.isEmpty()) {
-        String type = queue.pop();
-        if (!seen.add(type)) {
-          continue;
-        }
-        out.computeIfAbsent(type, t -> new LinkedHashSet<>()).add(kind);
-        JavaClass clazz = imported.get(type);
-        if (clazz == null) {
-          continue;
-        }
-        for (JavaField field : clazz.getAllFields()) {
-          if (field.getModifiers().contains(JavaModifier.STATIC)) {
+      Map<String, Boolean> level = new TreeMap<>(roots);
+      for (int depth = 0; !level.isEmpty(); depth++) {
+        // Every path of this depth is merged into `level` before any of it is expanded, so a type
+        // seen single here is still upgraded to plural by a sibling path of the same depth.
+        level.keySet().removeAll(seen);
+        seen.addAll(level.keySet());
+        Map<String, Boolean> next = new TreeMap<>();
+        for (Map.Entry<String, Boolean> entry : level.entrySet()) {
+          String type = entry.getKey();
+          boolean plural = entry.getValue();
+          out.merge(type, new Reached(Set.of(kind), depth, plural), Reached::merge);
+          JavaClass clazz = imported.get(type);
+          if (clazz == null) {
             continue;
           }
-          queue.addAll(importedNames(List.of(field.getType()), CONTAINERS));
+          for (JavaField field : clazz.getAllFields()) {
+            if (field.getModifiers().contains(JavaModifier.STATIC)) {
+              continue;
+            }
+            importedPlurality(List.of(field.getType()), CONTAINERS)
+                .forEach((held, hop) -> next.merge(held, plural || hop, Boolean::logicalOr));
+          }
         }
+        level = next;
       }
     }
 
-    /** {@code @APIResponse(content = @Content(schema = @Schema(implementation = T.class)))}. */
-    private Set<String> schemaImplementations(JavaMethod operation) {
+    /**
+     * {@code @APIResponse(content = @Content(schema = @Schema(implementation = T.class)))}, each
+     * to whether one of its {@code @Schema}s says {@code type = SchemaType.ARRAY}.
+     */
+    private Map<String, Boolean> schemaImplementations(JavaMethod operation) {
       List<JavaAnnotation<?>> responses = new ArrayList<>();
       operation.tryGetAnnotationOfType(API_RESPONSE).ifPresent(responses::add);
       operation
           .tryGetAnnotationOfType(API_RESPONSES)
           .flatMap(wrapper -> wrapper.get("value"))
           .ifPresent(value -> responses.addAll(annotations(value)));
-      Set<String> types = new HashSet<>();
+      Map<String, Boolean> types = new HashMap<>();
       for (JavaAnnotation<?> response : responses) {
         for (JavaAnnotation<?> content : annotations(response.get("content").orElse(null))) {
           for (JavaAnnotation<?> schema : annotations(content.get("schema").orElse(null))) {
+            boolean array =
+                schema
+                    .get("type")
+                    .filter(JavaEnumConstant.class::isInstance)
+                    .map(JavaEnumConstant.class::cast)
+                    .filter(type -> type.getDeclaringClass().getName().equals(SCHEMA_TYPE))
+                    .filter(type -> type.name().equals("ARRAY"))
+                    .isPresent();
             schema
                 .get("implementation")
                 .filter(JavaClass.class::isInstance)
                 .map(type -> ((JavaClass) type).getName())
                 .filter(imported::containsKey)
-                .ifPresent(types::add);
+                .ifPresent(type -> types.merge(type, array, Boolean::logicalOr));
           }
         }
       }
@@ -861,15 +947,18 @@ public final class EntityExposure {
       // One row per (operationId, method, path): the best dto by kind (direct > returns > schema
       // > body), ties broken by dto FQN lexicographically — see OPERATION_PRECEDENCE. Collapsing
       // rows must not shrink what reaches an operation at all, so every dto that reaches one —
-      // not only the one its row keeps — is tracked separately in `reaching`, for `dtos` below.
+      // not only the one its row keeps — is tracked separately in `reaching`, for `dtos` below,
+      // and per row in `rowTypes`, for the row's cardinality.
       Map<List<String>, OperationLink> operationLinks = new HashMap<>();
+      Map<List<String>, List<Map.Entry<String, Reached>>> rowTypes = new HashMap<>();
       Set<String> reaching = new TreeSet<>();
-      for (Map.Entry<JavaMethod, Map<String, Set<OperationKind>>> entry : exposed.entrySet()) {
+      for (Map.Entry<JavaMethod, Map<String, Reached>> entry : exposed.entrySet()) {
         JavaMethod operation = entry.getKey();
         String operationId = operationId(operation);
         String verb = verb(operation).orElseThrow();
         String path = path(operation);
-        for (Map.Entry<String, Set<OperationKind>> type : entry.getValue().entrySet()) {
+        List<String> row = List.of(operationId, verb, path);
+        for (Map.Entry<String, Reached> type : entry.getValue().entrySet()) {
           String dto = type.getKey();
           Set<OperationKind> kinds;
           if (dto.equals(name)) {
@@ -878,18 +967,34 @@ public final class EntityExposure {
                 .add(new DtoLink(name, LinkKind.DIRECT, null, site(operation)));
             kinds = Set.of(OperationKind.DIRECT);
           } else if (byType.containsKey(dto)) {
-            kinds = type.getValue();
+            kinds = type.getValue().kinds();
           } else {
             continue;
           }
           reaching.add(dto);
+          rowTypes
+              .computeIfAbsent(row, r -> new ArrayList<>())
+              .add(Map.entry(dto, type.getValue()));
           for (OperationKind kind : kinds) {
+            // The cardinality is the row's, decided below once every type reaching it is known.
             operationLinks.merge(
-                List.of(operationId, verb, path),
-                new OperationLink(operationId, verb, path, dto, kind),
+                row,
+                new OperationLink(operationId, verb, path, dto, kind, Cardinality.SINGLE),
                 (was, now) -> OPERATION_PRECEDENCE.compare(was, now) <= 0 ? was : now);
           }
         }
+      }
+      List<OperationLink> operations = new ArrayList<>();
+      for (Map.Entry<List<String>, OperationLink> row : operationLinks.entrySet()) {
+        OperationLink link = row.getValue();
+        operations.add(
+            new OperationLink(
+                link.operationId(),
+                link.method(),
+                link.path(),
+                link.dto(),
+                link.kind(),
+                cardinality(rowTypes.get(row.getKey()), byType)));
       }
       // The map keeps what reaches an operation: per type, its most direct link; a via link's
       // carrier is on the path too, so it keeps its own best link beside it.
@@ -922,53 +1027,94 @@ public final class EntityExposure {
           reason,
           projectionOf,
           List.copyOf(dtos),
-          List.copyOf(operationLinks.values()));
+          operations);
     }
 
     private static DtoLink best(List<DtoLink> candidates) {
       return candidates.stream().min(LINK_PRECEDENCE).orElseThrow();
     }
 
+    /**
+     * A row's cardinality, over the entity's types that reach it: those whose best link is the most
+     * direct kind among them, then the shallowest of those; a collection when any left is plural.
+     */
+    private static Cardinality cardinality(
+        List<Map.Entry<String, Reached>> types, Map<String, List<DtoLink>> byType) {
+      int mostDirect = Integer.MAX_VALUE;
+      for (Map.Entry<String, Reached> type : types) {
+        mostDirect = Math.min(mostDirect, kindRank(byType, type.getKey()));
+      }
+      int shallowest = Integer.MAX_VALUE;
+      for (Map.Entry<String, Reached> type : types) {
+        if (kindRank(byType, type.getKey()) == mostDirect) {
+          shallowest = Math.min(shallowest, type.getValue().depth());
+        }
+      }
+      for (Map.Entry<String, Reached> type : types) {
+        if (kindRank(byType, type.getKey()) == mostDirect
+            && type.getValue().depth() == shallowest
+            && type.getValue().plural()) {
+          return Cardinality.COLLECTION;
+        }
+      }
+      return Cardinality.SINGLE;
+    }
+
+    private static int kindRank(Map<String, List<DtoLink>> byType, String type) {
+      return LINK_KIND_ORDER.indexOf(best(byType.get(type)).kind());
+    }
+
     // --- helpers -------------------------------------------------------------------------------
 
     /** The imported classes these types hold, unwrapped through {@code wrappers}. */
     private Set<String> importedNames(List<JavaType> types, Set<String> wrappers) {
-      Set<String> out = new HashSet<>();
+      return new HashSet<>(importedPlurality(types, wrappers).keySet());
+    }
+
+    /**
+     * The same, each to whether a path to it crossed a {@link #PLURAL} wrapper or an array: {@code
+     * List<Dto>} and {@code Dto[]} give {@code Dto → true}, {@code Optional<Dto>} {@code Dto →
+     * false}.
+     */
+    private Map<String, Boolean> importedPlurality(List<JavaType> types, Set<String> wrappers) {
+      Map<String, Boolean> out = new HashMap<>();
       for (JavaType type : types) {
-        unwrap(type, wrappers, out, 0);
+        unwrap(type, wrappers, false, out, 0);
       }
-      out.retainAll(imported.keySet());
+      out.keySet().retainAll(imported.keySet());
       return out;
     }
 
-    private static void unwrap(JavaType type, Set<String> wrappers, Set<String> out, int depth) {
+    private static void unwrap(
+        JavaType type, Set<String> wrappers, boolean plural, Map<String, Boolean> out, int depth) {
       if (depth > 8) {
         return;
       }
       if (type instanceof JavaParameterizedType parameterized) {
         String raw = parameterized.toErasure().getName();
         if (!wrappers.contains(raw)) {
-          out.add(raw);
+          out.merge(raw, plural, Boolean::logicalOr);
           return;
         }
         List<JavaType> arguments = parameterized.getActualTypeArguments();
         if (MAP_LIKE.contains(raw) && !arguments.isEmpty()) {
           arguments = List.of(arguments.get(arguments.size() - 1));
         }
+        boolean through = plural || PLURAL.contains(raw);
         for (JavaType argument : arguments) {
-          unwrap(argument, wrappers, out, depth + 1);
+          unwrap(argument, wrappers, through, out, depth + 1);
         }
       } else if (type instanceof JavaWildcardType wildcard) {
         for (JavaType bound : wildcard.getUpperBounds()) {
-          unwrap(bound, wrappers, out, depth + 1);
+          unwrap(bound, wrappers, plural, out, depth + 1);
         }
       } else if (type instanceof JavaGenericArrayType array) {
-        unwrap(array.getComponentType(), wrappers, out, depth + 1);
+        unwrap(array.getComponentType(), wrappers, true, out, depth + 1);
       } else if (type instanceof JavaClass clazz) {
         if (clazz.isArray()) {
-          unwrap(clazz.getBaseComponentType(), wrappers, out, depth + 1);
+          unwrap(clazz.getBaseComponentType(), wrappers, true, out, depth + 1);
         } else if (!wrappers.contains(clazz.getName())) {
-          out.add(clazz.getName());
+          out.merge(clazz.getName(), plural, Boolean::logicalOr);
         }
       }
       // A type variable says nothing the bytecode can name; its bound is usually Object.

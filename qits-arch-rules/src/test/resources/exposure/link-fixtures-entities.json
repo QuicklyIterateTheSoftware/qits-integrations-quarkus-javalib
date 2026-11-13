@@ -1,5 +1,5 @@
 {
-  "formatVersion" : 1,
+  "formatVersion" : 2,
   "application" : "qits-fixture",
   "entities" : [
     {
@@ -23,7 +23,40 @@
           "method" : "GET",
           "path" : "/alphas/{id}",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AlphaDto",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Atlas",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AtlasItem",
+          "kind" : "mapper",
+          "via" : null,
+          "site" : "AtlasMapper.toItem(Atlas)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AtlasPage",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "AtlasAssembler.page()"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "AtlasResource.page",
+          "method" : "GET",
+          "path" : "/atlases",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$AtlasItem",
+          "kind" : "returns",
+          "cardinality" : "collection"
         }
       ]
     },
@@ -48,7 +81,8 @@
           "method" : "GET",
           "path" : "/bravos",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$BravoDto",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "collection"
         }
       ]
     },
@@ -73,7 +107,8 @@
           "method" : "GET",
           "path" : "/charlies",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$CharlieDto",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -98,7 +133,8 @@
           "method" : "GET",
           "path" : "/deltas",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$DeltaSummary",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -129,7 +165,8 @@
           "method" : "GET",
           "path" : "/echoes",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$EchoView",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -154,7 +191,8 @@
           "method" : "GET",
           "path" : "/foxtrots",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$FoxtrotDto",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -179,7 +217,8 @@
           "method" : "GET",
           "path" : "/golfs/{id}",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$GolfDto",
-          "kind" : "body"
+          "kind" : "body",
+          "cardinality" : "single"
         }
       ]
     },
@@ -210,7 +249,8 @@
           "method" : "GET",
           "path" : "/hotels",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$HotelPage",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "collection"
         }
       ]
     },
@@ -235,14 +275,48 @@
           "method" : "POST",
           "path" : "/indias",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$IndiaDto",
-          "kind" : "schema"
+          "kind" : "schema",
+          "cardinality" : "single"
         },
         {
           "operationId" : "IndiaResource.get",
           "method" : "GET",
           "path" : "/indias",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$IndiaDto",
-          "kind" : "schema"
+          "kind" : "schema",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Juliet",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$JulietDetail",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "JulietDetail.from(Juliet)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$JulietLine",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "JulietLine.from(Juliet)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "JulietResource.get",
+          "method" : "GET",
+          "path" : "/juliets",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$JulietDetail",
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -267,7 +341,8 @@
           "method" : "GET",
           "path" : "/kilos",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KiloCount",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -332,7 +407,8 @@
           "method" : "GET",
           "path" : "/papas",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",
-          "kind" : "direct"
+          "kind" : "direct",
+          "cardinality" : "collection"
         }
       ]
     },
@@ -357,7 +433,8 @@
           "method" : "GET",
           "path" : "/quebecs",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$QuebecDto",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -418,7 +495,8 @@
           "method" : "GET",
           "path" : "/uniforms",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$UniformView",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         }
       ]
     },
@@ -477,14 +555,158 @@
           "method" : "GET",
           "path" : "/whiskeys",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyZulu",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
         },
         {
           "operationId" : "WhiskeyResource.page",
           "method" : "GET",
           "path" : "/whiskeys",
           "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$WhiskeyAlpha",
-          "kind" : "returns"
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Xray",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "XrayDto.from(Xray)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "XrayResource.array",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "XrayResource.byName",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "XrayResource.later",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "single"
+        },
+        {
+          "operationId" : "XrayResource.list",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "XrayResource.maybe",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "single"
+        },
+        {
+          "operationId" : "XrayResource.one",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "single"
+        },
+        {
+          "operationId" : "XrayResource.stream",
+          "method" : "GET",
+          "path" : "/xrays",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$XrayDto",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Yankee",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$YankeeDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "YankeeDto.from(Yankee)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "YankeeResource.all",
+          "method" : "GET",
+          "path" : "/yankees",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$YankeeDto",
+          "kind" : "body",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "YankeeResource.one",
+          "method" : "GET",
+          "path" : "/yankees",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$YankeeDto",
+          "kind" : "body",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Zulu",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$ZuluDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "ZuluDto.from(Zulu)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "ZuluResource.all",
+          "method" : "GET",
+          "path" : "/zulus",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$ZuluDto",
+          "kind" : "schema",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "ZuluResource.one",
+          "method" : "GET",
+          "path" : "/zulus",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$ZuluDto",
+          "kind" : "schema",
+          "cardinality" : "single"
         }
       ]
     }

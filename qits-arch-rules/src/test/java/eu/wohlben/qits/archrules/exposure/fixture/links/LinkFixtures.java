@@ -3,6 +3,8 @@ package eu.wohlben.qits.archrules.exposure.fixture.links;
 import eu.wohlben.qits.db.exposure.Exposes;
 import eu.wohlben.qits.db.exposure.Projection;
 import eu.wohlben.qits.db.exposure.Technical;
+import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.Uni;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.EmbeddedId;
@@ -15,11 +17,13 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -615,6 +619,194 @@ public final class LinkFixtures {
   public static class VictorResource {
     @GET
     public VictorView get() {
+      return null;
+    }
+  }
+
+  // --- cardinality: the return type, one operation per wrapper --------------------------------
+
+  /** One factory-linked DTO, returned bare and through every wrapper: one row per operation. */
+  @Entity
+  public static class Xray {
+    public String name;
+  }
+
+  public record XrayDto(String name) {
+    public static XrayDto from(Xray xray) {
+      return new XrayDto(xray.name);
+    }
+  }
+
+  @Path("/xrays")
+  public static class XrayResource {
+    @GET
+    public List<XrayDto> list() {
+      return List.of();
+    }
+
+    @GET
+    public XrayDto[] array() {
+      return new XrayDto[0];
+    }
+
+    @GET
+    public Multi<XrayDto> stream() {
+      return null;
+    }
+
+    @GET
+    public Map<String, XrayDto> byName() {
+      return Map.of();
+    }
+
+    @GET
+    public XrayDto one() {
+      return null;
+    }
+
+    @GET
+    public Optional<XrayDto> maybe() {
+      return Optional.empty();
+    }
+
+    @GET
+    public Uni<XrayDto> later() {
+      return null;
+    }
+  }
+
+  // --- cardinality: a Response body, by what it builds ----------------------------------------
+
+  @Entity
+  public static class Yankee {
+    public String name;
+  }
+
+  public record YankeeDto(String name) {
+    public static YankeeDto from(Yankee yankee) {
+      return new YankeeDto(yankee.name);
+    }
+  }
+
+  public static class YankeeService {
+    public static List<YankeeDto> all() {
+      return List.of();
+    }
+  }
+
+  @Path("/yankees")
+  public static class YankeeResource {
+    /** News one YankeeDto: single. */
+    @GET
+    public Response one() {
+      return Response.ok(new YankeeDto("one")).build();
+    }
+
+    /** Hands out what a List<YankeeDto>-returning call gives back: a collection. */
+    @GET
+    public Response all() {
+      return Response.ok(YankeeService.all()).build();
+    }
+  }
+
+  // --- cardinality: @Schema, single unless type = ARRAY ---------------------------------------
+
+  @Entity
+  public static class Zulu {
+    public String name;
+  }
+
+  public record ZuluDto(String name) {
+    public static ZuluDto from(Zulu zulu) {
+      return new ZuluDto(zulu.name);
+    }
+  }
+
+  @Path("/zulus")
+  public static class ZuluResource {
+    @GET
+    @APIResponse(
+        responseCode = "200",
+        content = @Content(schema = @Schema(implementation = ZuluDto.class)))
+    public Response one() {
+      return Response.ok(rendered()).build();
+    }
+
+    @GET
+    @APIResponse(
+        responseCode = "200",
+        content =
+            @Content(schema = @Schema(type = SchemaType.ARRAY, implementation = ZuluDto.class)))
+    public Response all() {
+      return Response.ok(rendered()).build();
+    }
+
+    private static String rendered() {
+      return "[]";
+    }
+  }
+
+  // --- cardinality: a detail DTO holding a list of another DTO of the same entity -------------
+
+  /** JulietDetail (depth 0) beats the JulietLine list it holds (depth 1): single. */
+  @Entity
+  public static class Juliet {
+    public String name;
+  }
+
+  public record JulietLine(String name) {
+    public static JulietLine from(Juliet juliet) {
+      return new JulietLine(juliet.name);
+    }
+  }
+
+  public record JulietDetail(String name, List<JulietLine> lines) {
+    public static JulietDetail from(Juliet juliet) {
+      return new JulietDetail(juliet.name, List.of());
+    }
+  }
+
+  @Path("/juliets")
+  public static class JulietResource {
+    @GET
+    public JulietDetail get() {
+      return null;
+    }
+  }
+
+  // --- cardinality: an assembler-linked page of mapper-linked items ---------------------------
+
+  /** AtlasPage's assembler link loses to AtlasItem's mapper link, held as a list: a collection. */
+  @Entity
+  public static class Atlas {
+    public String name;
+
+    public static List<Atlas> listAll() {
+      return List.of();
+    }
+  }
+
+  public record AtlasItem(String name) {}
+
+  public interface AtlasMapper {
+    AtlasItem toItem(Atlas atlas);
+  }
+
+  public record AtlasPage(List<AtlasItem> items, int total) {}
+
+  public static class AtlasAssembler {
+    AtlasMapper mapper;
+
+    public AtlasPage page() {
+      List<AtlasItem> items = Atlas.listAll().stream().map(mapper::toItem).toList();
+      return new AtlasPage(items, items.size());
+    }
+  }
+
+  @Path("/atlases")
+  public static class AtlasResource {
+    @GET
+    public AtlasPage page() {
       return null;
     }
   }

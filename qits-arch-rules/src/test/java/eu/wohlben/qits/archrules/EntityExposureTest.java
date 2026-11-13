@@ -12,6 +12,7 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.EvaluationResult;
+import eu.wohlben.qits.archrules.ExposureMap.Cardinality;
 import eu.wohlben.qits.archrules.ExposureMap.DtoLink;
 import eu.wohlben.qits.archrules.ExposureMap.EntityNode;
 import eu.wohlben.qits.archrules.ExposureMap.LinkKind;
@@ -78,14 +79,14 @@ class EntityExposureTest {
   @Test
   void aStaticFactoryOnTheDtoIsAFactoryLink() {
     assertDto("Alpha", "AlphaDto", LinkKind.FACTORY, "AlphaDto.from(Alpha)");
-    assertOperation("Alpha", "AlphaResource.get", "GET", "/alphas/{id}", "AlphaDto", OperationKind.RETURNS);
+    assertOperation("Alpha", "AlphaResource.get", "GET", "/alphas/{id}", "AlphaDto", OperationKind.RETURNS, Cardinality.SINGLE);
     assertEquals("alpha", entity("Alpha").table());
   }
 
   @Test
   void aDtoConstructorTakingTheEntityIsAFactoryLink() {
     assertDto("Bravo", "BravoDto", LinkKind.FACTORY, "BravoDto.<init>(Bravo)");
-    assertOperation("Bravo", "listBravos", "GET", "/bravos", "BravoDto", OperationKind.RETURNS);
+    assertOperation("Bravo", "listBravos", "GET", "/bravos", "BravoDto", OperationKind.RETURNS, Cardinality.COLLECTION);
     assertNull(entity("Bravo").table());
   }
 
@@ -93,7 +94,7 @@ class EntityExposureTest {
   void anAbstractMapperMethodIsAMapperLinkWithoutAnyImpl() {
     assertDto("Charlie", "CharlieDto", LinkKind.MAPPER, "CharlieMapper.toDto(Charlie)");
     assertOperation(
-        "Charlie", "CharlieResource.one", "GET", "/charlies", "CharlieDto", OperationKind.RETURNS);
+        "Charlie", "CharlieResource.one", "GET", "/charlies", "CharlieDto", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   @Test
@@ -102,7 +103,7 @@ class EntityExposureTest {
     assertDto("Delta", "DeltaSummary", LinkKind.ASSEMBLER, "DeltaAssembler.all()");
     assertEquals(1, entity("Delta").dtos().size(), entity("Delta").toString());
     assertOperation(
-        "Delta", "DeltaResource.summary", "GET", "/deltas", "DeltaSummary", OperationKind.RETURNS);
+        "Delta", "DeltaResource.summary", "GET", "/deltas", "DeltaSummary", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   @Test
@@ -111,20 +112,20 @@ class EntityExposureTest {
     DtoLink via = dto("Echo", "EchoView", LinkKind.VIA);
     assertEquals(F + "EchoLive", via.via());
     assertEquals("EchoView.from(EchoLive)", via.site());
-    assertOperation("Echo", "EchoResource.live", "GET", "/echoes", "EchoView", OperationKind.RETURNS);
+    assertOperation("Echo", "EchoResource.live", "GET", "/echoes", "EchoView", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   @Test
   void exposesOnTheDtoIsAnAnnotationLink() {
     assertDto("Foxtrot", "FoxtrotDto", LinkKind.ANNOTATION, "@Exposes on FoxtrotDto");
     assertOperation(
-        "Foxtrot", "FoxtrotResource.get", "GET", "/foxtrots", "FoxtrotDto", OperationKind.RETURNS);
+        "Foxtrot", "FoxtrotResource.get", "GET", "/foxtrots", "FoxtrotDto", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   @Test
   void callsOnAClassImplementingARepositoryOfTheEntityReadTheEntity() {
     assertDto("Kilo", "KiloCount", LinkKind.ASSEMBLER, "KiloService.count()");
-    assertOperation("Kilo", "KiloResource.count", "GET", "/kilos", "KiloCount", OperationKind.RETURNS);
+    assertOperation("Kilo", "KiloResource.count", "GET", "/kilos", "KiloCount", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   // --- type → operation ------------------------------------------------------------------------
@@ -132,7 +133,7 @@ class EntityExposureTest {
   @Test
   void aResponseOperationWhoseBodyNewsTheDtoExposesItByBody() {
     assertDto("Golf", "GolfDto", LinkKind.ASSEMBLER, "GolfResource.get(UUID)");
-    assertOperation("Golf", "GolfResource.get", "GET", "/golfs/{id}", "GolfDto", OperationKind.BODY);
+    assertOperation("Golf", "GolfResource.get", "GET", "/golfs/{id}", "GolfDto", OperationKind.BODY, Cardinality.SINGLE);
     // Finding the row to map is not handing out the row.
     assertFalse(
         entity("Golf").operations().stream().anyMatch(op -> op.kind() == OperationKind.DIRECT),
@@ -143,25 +144,26 @@ class EntityExposureTest {
   void aDtoHeldAsAListFieldIsExposedByTheOperationReturningItsHolder() {
     assertDto("Hotel", "HotelRow", LinkKind.FACTORY, "HotelRow.from(Hotel)");
     // HotelPage (the holder, reached via HotelRow) and HotelRow itself both return the same way:
-    // one collapsed row, keeping HotelPage — it sorts first.
+    // one collapsed row, keeping HotelPage — it sorts first. HotelRow's factory link beats
+    // HotelPage's via link, and HotelRow is held as a List: the page is a collection.
     assertEquals(
         List.of(
             new OperationLink(
-                "HotelResource.page", "GET", "/hotels", F + "HotelPage", OperationKind.RETURNS)),
+                "HotelResource.page", "GET", "/hotels", F + "HotelPage", OperationKind.RETURNS, Cardinality.COLLECTION)),
         entity("Hotel").operations());
   }
 
   @Test
   void anApiResponseSchemaExposesTheDtoSingleOrInsideApiResponses() {
-    assertOperation("India", "IndiaResource.get", "GET", "/indias", "IndiaDto", OperationKind.SCHEMA);
+    assertOperation("India", "IndiaResource.get", "GET", "/indias", "IndiaDto", OperationKind.SCHEMA, Cardinality.SINGLE);
     assertOperation(
-        "India", "IndiaResource.create", "POST", "/indias", "IndiaDto", OperationKind.SCHEMA);
+        "India", "IndiaResource.create", "POST", "/indias", "IndiaDto", OperationKind.SCHEMA, Cardinality.SINGLE);
   }
 
   @Test
   void anOperationReturningTheEntityExposesItDirectly() {
     assertDto("Papa", "Papa", LinkKind.DIRECT, "PapaResource.list()");
-    assertOperation("Papa", "PapaResource.list", "GET", "/papas", "Papa", OperationKind.DIRECT);
+    assertOperation("Papa", "PapaResource.list", "GET", "/papas", "Papa", OperationKind.DIRECT, Cardinality.COLLECTION);
   }
 
   @Test
@@ -173,6 +175,66 @@ class EntityExposureTest {
     assertFalse(entity("November").exposed());
     assertFalse(entity("Oscar").exposed());
     assertTrue(entity("November").dtos().isEmpty(), entity("November").toString());
+  }
+
+  // --- cardinality --------------------------------------------------------------------------------
+
+  @Test
+  void aListArrayMultiOrMapReturnIsACollection() {
+    assertEquals(Cardinality.COLLECTION, cardinality("Xray", "XrayResource.list"));
+    assertEquals(Cardinality.COLLECTION, cardinality("Xray", "XrayResource.array"));
+    assertEquals(Cardinality.COLLECTION, cardinality("Xray", "XrayResource.stream"));
+    assertEquals(Cardinality.COLLECTION, cardinality("Xray", "XrayResource.byName"));
+  }
+
+  @Test
+  void aBareOptionalOrUniReturnIsSingle() {
+    assertOperation(
+        "Xray", "XrayResource.one", "GET", "/xrays", "XrayDto", OperationKind.RETURNS,
+        Cardinality.SINGLE);
+    assertEquals(Cardinality.SINGLE, cardinality("Xray", "XrayResource.maybe"));
+    assertEquals(Cardinality.SINGLE, cardinality("Xray", "XrayResource.later"));
+  }
+
+  @Test
+  void anEntityReturnedAsAListIsACollection() {
+    assertEquals(Cardinality.COLLECTION, cardinality("Papa", "PapaResource.list"));
+  }
+
+  @Test
+  void anAssemblerLinkedPageOfMapperLinkedItemsIsACollection() {
+    // AtlasItem's mapper link beats AtlasPage's assembler link; AtlasItem rides in a List.
+    assertDto("Atlas", "AtlasItem", LinkKind.MAPPER, "AtlasMapper.toItem(Atlas)");
+    assertDto("Atlas", "AtlasPage", LinkKind.ASSEMBLER, "AtlasAssembler.page()");
+    assertEquals(Cardinality.COLLECTION, cardinality("Atlas", "AtlasResource.page"));
+  }
+
+  @Test
+  void aDetailHoldingAListOfAnotherDtoOfTheSameEntityIsSingle() {
+    // Both factory-linked: the detail at depth 0 beats its line list at depth 1.
+    assertOperation(
+        "Juliet", "JulietResource.get", "GET", "/juliets", "JulietDetail", OperationKind.RETURNS,
+        Cardinality.SINGLE);
+  }
+
+  @Test
+  void aResponseBodyIsSingleWhenItNewsOneAndACollectionWhenItCallsForAList() {
+    assertOperation(
+        "Yankee", "YankeeResource.one", "GET", "/yankees", "YankeeDto", OperationKind.BODY,
+        Cardinality.SINGLE);
+    assertOperation(
+        "Yankee", "YankeeResource.all", "GET", "/yankees", "YankeeDto", OperationKind.BODY,
+        Cardinality.COLLECTION);
+  }
+
+  @Test
+  void aSchemaIsSingleUnlessItsTypeIsArray() {
+    assertOperation(
+        "Zulu", "ZuluResource.one", "GET", "/zulus", "ZuluDto", OperationKind.SCHEMA,
+        Cardinality.SINGLE);
+    assertOperation(
+        "Zulu", "ZuluResource.all", "GET", "/zulus", "ZuluDto", OperationKind.SCHEMA,
+        Cardinality.COLLECTION);
   }
 
   // --- what the map keeps --------------------------------------------------------------------------
@@ -187,7 +249,7 @@ class EntityExposureTest {
     // Returned and named as its schema: one row, the stronger kind.
     assertEquals(
         List.of(
-            new OperationLink("QuebecResource.get", "GET", "/quebecs", F + "QuebecDto", OperationKind.RETURNS)),
+            new OperationLink("QuebecResource.get", "GET", "/quebecs", F + "QuebecDto", OperationKind.RETURNS, Cardinality.SINGLE)),
         quebec.operations());
   }
 
@@ -217,7 +279,7 @@ class EntityExposureTest {
     assertEquals(
         List.of(
             new OperationLink(
-                "WhiskeyResource.page", "GET", "/whiskeys", F + "WhiskeyAlpha", OperationKind.RETURNS)),
+                "WhiskeyResource.page", "GET", "/whiskeys", F + "WhiskeyAlpha", OperationKind.RETURNS, Cardinality.SINGLE)),
         whiskey.operations().stream()
             .filter(op -> op.operationId().equals("WhiskeyResource.page"))
             .toList());
@@ -228,7 +290,7 @@ class EntityExposureTest {
     assertEquals(
         List.of(
             new OperationLink(
-                "WhiskeyResource.fetch", "GET", "/whiskeys", F + "WhiskeyZulu", OperationKind.RETURNS)),
+                "WhiskeyResource.fetch", "GET", "/whiskeys", F + "WhiskeyZulu", OperationKind.RETURNS, Cardinality.SINGLE)),
         whiskey.operations().stream()
             .filter(op -> op.operationId().equals("WhiskeyResource.fetch"))
             .toList());
@@ -259,7 +321,7 @@ class EntityExposureTest {
     DtoLink via = dto("Uniform", "UniformView", LinkKind.VIA);
     assertEquals(F + "UniformAddress", via.via());
     assertOperation(
-        "Uniform", "UniformResource.get", "GET", "/uniforms", "UniformView", OperationKind.RETURNS);
+        "Uniform", "UniformResource.get", "GET", "/uniforms", "UniformView", OperationKind.RETURNS, Cardinality.SINGLE);
   }
 
   @Test
@@ -482,11 +544,18 @@ class EntityExposureTest {
 
     EntityExposure.verify(FIXTURES, "qits-fixture", GAPS, file, true);
     String written = Files.readString(file, StandardCharsets.UTF_8);
-    assertTrue(written.startsWith("{\n  \"formatVersion\" : 1,\n  \"application\" : \"qits-fixture\","), written);
+    assertTrue(written.startsWith("{\n  \"formatVersion\" : 2,\n  \"application\" : \"qits-fixture\","), written);
     assertTrue(written.endsWith("}\n"), written);
     assertFalse(written.contains("\r"), "LF only");
     assertTrue(written.contains("\"knownGap\" : \"qits-1945\""), written);
     assertTrue(written.contains("\"kind\" : \"via\""), written);
+    // Every operation row carries its cardinality, right after its kind.
+    assertEquals(
+        written.split("\"operationId\" :", -1).length - 1,
+        written.split("\",\n          \"cardinality\" : \"", -1).length - 1,
+        written);
+    assertTrue(written.contains("\"kind\" : \"returns\",\n          \"cardinality\" : \"collection\""), written);
+    assertTrue(written.contains("\"cardinality\" : \"single\""), written);
 
     EntityExposure.verify(FIXTURES, "qits-fixture", GAPS, file, false);
 
@@ -542,10 +611,28 @@ class EntityExposureTest {
   }
 
   private static void assertOperation(
-      String entity, String operationId, String method, String path, String dto, OperationKind kind) {
+      String entity,
+      String operationId,
+      String method,
+      String path,
+      String dto,
+      OperationKind kind,
+      Cardinality cardinality) {
     assertTrue(
-        entity(entity).operations().contains(new OperationLink(operationId, method, path, F + dto, kind)),
+        entity(entity)
+            .operations()
+            .contains(new OperationLink(operationId, method, path, F + dto, kind, cardinality)),
         entity(entity).toString());
+  }
+
+  /** The cardinality of the entity's one row for this operationId. */
+  private static Cardinality cardinality(String entity, String operationId) {
+    List<OperationLink> rows =
+        entity(entity).operations().stream()
+            .filter(op -> op.operationId().equals(operationId))
+            .toList();
+    assertEquals(1, rows.size(), entity(entity).toString());
+    return rows.get(0).cardinality();
   }
 
   private static String report(ArchRule rule, JavaClasses classes) {

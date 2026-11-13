@@ -561,7 +561,7 @@ not shaped `<application>:<EntitySimpleName>`, both markers at once, either on a
 
 `EntityExposure.verify` renders the map — `formatVersion`, `application`, and per entity its table,
 marking, known gap, linked `dtos` (type, kind, via, site) and `operations` (operationId, method,
-path, dto, kind), all sorted, LF, trailing newline — and compares it with the file; a missing or
+path, dto, kind, cardinality), all sorted, LF, trailing newline — and compares it with the file; a missing or
 different file fails with a diff. The map is **pruned** to stay reviewable as a diff: the verdict is
 taken over every link, but `dtos` lists only the types on a path to an operation, **one link per
 type** — the most direct, `direct > annotation > factory > mapper > assembler > via`, ties broken by
@@ -569,8 +569,11 @@ type** — the most direct, `direct > annotation > factory > mapper > assembler 
 unexposed entity records `dtos: []`. `operations` holds **one row per (operationId, method, path)**:
 where several of the entity's DTOs reach the same operation, `dto` is the best one by kind,
 `direct > returns > schema > body`, ties broken by `dto` FQN lexicographically, and `kind` is that
-row's kind. `-Dgolden.update=true` (or `QITS_GOLDEN_UPDATE=true`) writes it
-instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
+row's kind. `cardinality` says whether the answer carries several of the entity's data
+(`collection`: a `List`, array, `Multi`, map values, a page of its rows, a `@Schema(type = ARRAY)`)
+or one (`single`), decided over every type of the entity's reaching the row: the most direct link
+kind first, then the shallowest field depth (format version 2). `-Dgolden.update=true` (or
+`QITS_GOLDEN_UPDATE=true`) writes it instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
 real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
 rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.
 

@@ -108,6 +108,15 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <!-- Same fixture-only reason: Uni and Multi, which EntityExposure unwraps by name and
+                 counts Multi as plural (qits-2140). Also reaches the test classpath through
+                 quarkus-websockets-next; declared so the fixtures do not hang on that. The version
+                 is the Quarkus BOM's. -->
+            <groupId>io.smallrye.reactive</groupId>
+            <artifactId>mutiny</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <!-- The config implementation the tests build their fixtures with — Quarkus' own, so
                  what the rule sees here is what it sees in a service. No Quarkus server: this is
                  the config library alone. -->
