@@ -145,14 +145,23 @@ import java.util.stream.Collectors;
  * data ({@code collection}) or one ({@code single}). A hop through {@code Collection}/{@code
  * List}/{@code Set}/{@code Stream}/{@code Iterable}, a map's value, {@code Multi} or an array is
  * plural; {@code Optional}, {@code Uni}, {@code CompletionStage} and {@code RestResponse} are not.
- * Every reached type carries its depth (0 for a root, one more per field hop) and whether its
- * shallowest path crossed a plural hop — a {@code body} construction and a {@code schema} are
- * single roots, unless that {@code @Schema} says {@code type = SchemaType.ARRAY}. The row looks at
- * the entity's types that reach the operation, keeps those whose own best link is the most direct
- * kind among them, then the shallowest, and is a collection when any of those is plural. Decided
- * per row, not per kept {@code dto}: a page wrapper linked by assembler or via loses to the item
- * DTO its list carries, so the page is a collection; a detail DTO at depth 0 beats the child-list
- * DTO at depth 1 it holds, so the detail is single.
+ * A <em>transparent</em> type is a pure wrapper: an imported non-entity whose instance fields hold
+ * imported types — at least one does — or are primitives, boxed numbers or booleans, and nothing
+ * else ({@code WorkBriefs(List<WorkBrief>)}, {@code Page(List<Row> rows, int total)}, {@code
+ * Response(RequestDto request)}). Every reached type carries its depth (0 for a root, one more per
+ * field hop, except a hop out of a transparent type, which costs none) and whether a path at that
+ * depth crossed a plural hop — a {@code body} construction and a {@code schema} are single roots,
+ * unless that {@code @Schema} says {@code type = SchemaType.ARRAY}. A {@code via} link is the
+ * weakest evidence: the type is reached only through a carrier, so where the entity also reaches
+ * the operation by a more direct kind, that type decides instead. The row looks at the entity's
+ * types that reach the operation less the transparent ones (all of them, if only transparent ones
+ * reach it), less in turn the via-linked ones where any other kind is left (all of them, if every
+ * one left is via), keeps the shallowest, then those whose own best link is the most direct kind
+ * among them, and is a collection when any of those is plural. Decided per row, not per kept
+ * {@code dto}: a page wrapper is looked through to the items its list carries, at the page's own depth,
+ * so the page is a collection whatever either is linked by; a detail DTO at depth 0 beats the
+ * child-list DTO at depth 1 it holds, however more directly that one is linked, so the detail is
+ * single.
  *
  * <p><b>Known limits.</b> The rule errs lenient, never strict, where bytecode cannot tell:
  *
@@ -161,6 +170,10 @@ import java.util.stream.Collectors;
  *       an authentication lookup — resolving the caller's session or user row into some imported
  *       type — counts as handing that type out. It only makes the gate lenient: an entity can pass
  *       on a lookup nobody reads, never fail on one.
+ *   <li>A wrapper carrying anything but what it holds and counts — a {@code String} cursor, an
+ *       enum, a timestamp — is not transparent: {@code Page(List<Row> rows, String cursor)} counts
+ *       as data of its own at the depth it is returned, so where it is linked to the entity it
+ *       reads as {@code single} though it is a page.
  *   <li>Only JAX-RS doors are seen. Vert.x {@code Router} routes, {@code @Route} methods, WebSocket
  *       endpoints and any other non-JAX-RS door are invisible, so an entity handed out only there
  *       reads as unexposed; mark it, or list it as a known gap.
@@ -289,6 +302,21 @@ public final class EntityExposure {
           "java.util.NavigableMap",
           "io.smallrye.mutiny.Multi");
 
+  /**
+   * The non-primitive field types a transparent wrapper may carry beside what it holds: a count, a
+   * total, a flag — the boxed numbers, {@code Number} and {@code Boolean}.
+   */
+  static final Set<String> COUNTS =
+      Set.of(
+          "java.lang.Integer",
+          "java.lang.Long",
+          "java.lang.Short",
+          "java.lang.Byte",
+          "java.lang.Double",
+          "java.lang.Float",
+          "java.lang.Number",
+          "java.lang.Boolean");
+
   /** {@code @Schema(type = SchemaType.ARRAY)}: the schema describes several of its type. */
   static final String SCHEMA_TYPE = "org.eclipse.microprofile.openapi.annotations.enums.SchemaType";
 
@@ -367,6 +395,13 @@ public final class EntityExposure {
     ExposureMap computed = new Analysis(classes).run();
     CACHE.put(first, new Cached(size, computed));
     return computed;
+  }
+
+  /** Whether the cardinality looks through {@code type} in this import; for the self-test. */
+  static boolean isTransparent(Iterable<JavaClass> classes, String type) {
+    Analysis analysis = new Analysis(classes);
+    analysis.run();
+    return analysis.transparent(type);
   }
 
   /**
@@ -530,6 +565,9 @@ public final class EntityExposure {
 
     /** Operation to the types it hands out, each with the ways it does, its depth and plurality. */
     private final Map<JavaMethod, Map<String, Reached>> exposed = new LinkedHashMap<>();
+
+    /** Type to whether it is {@link #transparent}, computed once. */
+    private final Map<String, Boolean> transparency = new HashMap<>();
 
     Analysis(Iterable<JavaClass> classes) {
       for (JavaClass clazz : classes) {
@@ -788,7 +826,8 @@ public final class EntityExposure {
 
     /**
      * How an operation reaches a type: the ways it does, the shallowest depth it does at (0 for a
-     * root, one more per field hop), and whether a path at that depth crossed a plural hop.
+     * root, one more per field hop out of a type that is not {@link #transparent}), and whether a
+     * path at that depth crossed a plural hop.
      */
     private record Reached(Set<OperationKind> kinds, int depth, boolean plural) {
 
@@ -844,36 +883,98 @@ public final class EntityExposure {
 
     /**
      * Adds the roots (each to whether it is plural) and every imported type they hold as instance
-     * fields, transitively, level by level: a type keeps the shallowest depth it is reached at, and
-     * is plural there when any path of that depth crossed a plural hop, the root's own included.
+     * fields, transitively, level by level: a hop out of a {@link #transparent} type costs no
+     * depth, any other one level. A type keeps the shallowest depth it is reached at, and is plural
+     * there when any path of that depth crossed a plural hop, the root's own included.
      */
     private void reach(Map<String, Boolean> roots, OperationKind kind, Map<String, Reached> out) {
       Set<String> seen = new HashSet<>();
       Map<String, Boolean> level = new TreeMap<>(roots);
       for (int depth = 0; !level.isEmpty(); depth++) {
-        // Every path of this depth is merged into `level` before any of it is expanded, so a type
-        // seen single here is still upgraded to plural by a sibling path of the same depth.
+        // A 0-1 search: what a transparent type holds joins this level rather than the next, and
+        // the level is expanded to a fixpoint before it is settled, so a type seen single here is
+        // still upgraded to plural — and re-expanded — by a sibling path of the same depth.
         level.keySet().removeAll(seen);
-        seen.addAll(level.keySet());
+        Map<String, Boolean> current = new TreeMap<>();
+        Deque<String> work = new ArrayDeque<>();
+        level.forEach((type, plural) -> offer(type, plural, current, work));
         Map<String, Boolean> next = new TreeMap<>();
-        for (Map.Entry<String, Boolean> entry : level.entrySet()) {
-          String type = entry.getKey();
-          boolean plural = entry.getValue();
-          out.merge(type, new Reached(Set.of(kind), depth, plural), Reached::merge);
+        while (!work.isEmpty()) {
+          String type = work.pop();
+          boolean plural = current.get(type);
           JavaClass clazz = imported.get(type);
           if (clazz == null) {
             continue;
           }
+          boolean free = transparent(type);
           for (JavaField field : clazz.getAllFields()) {
             if (field.getModifiers().contains(JavaModifier.STATIC)) {
               continue;
             }
             importedPlurality(List.of(field.getType()), CONTAINERS)
-                .forEach((held, hop) -> next.merge(held, plural || hop, Boolean::logicalOr));
+                .forEach(
+                    (held, hop) -> {
+                      if (!free) {
+                        next.merge(held, plural || hop, Boolean::logicalOr);
+                      } else if (!seen.contains(held)) {
+                        offer(held, plural || hop, current, work);
+                      }
+                    });
           }
         }
+        for (Map.Entry<String, Boolean> entry : current.entrySet()) {
+          out.merge(
+              entry.getKey(), new Reached(Set.of(kind), depth, entry.getValue()), Reached::merge);
+        }
+        seen.addAll(current.keySet());
         level = next;
       }
+    }
+
+    /** Puts a type on this level, queueing it when it is new here or just turned plural. */
+    private static void offer(
+        String type, boolean plural, Map<String, Boolean> current, Deque<String> work) {
+      Boolean was = current.get(type);
+      if (was == null || (plural && !was)) {
+        current.put(type, plural);
+        work.add(type);
+      }
+    }
+
+    /**
+     * Whether a type is a pure wrapper the cardinality looks through: imported, no entity, and
+     * every non-static, non-synthetic instance field holds imported types (at least one does) or is
+     * a primitive, a boxed number or a boolean. One field of anything else — a {@code String}, an
+     * enum, an {@code Instant}, a JDK collection of strings — makes it carry data of its own.
+     */
+    private boolean transparent(String type) {
+      Boolean known = transparency.get(type);
+      if (known != null) {
+        return known;
+      }
+      boolean result = false;
+      JavaClass clazz = imported.get(type);
+      if (clazz != null && !entities.contains(type)) {
+        boolean holds = false;
+        boolean other = false;
+        for (JavaField field : clazz.getAllFields()) {
+          Set<JavaModifier> modifiers = field.getModifiers();
+          if (modifiers.contains(JavaModifier.STATIC)
+              || modifiers.contains(JavaModifier.SYNTHETIC)) {
+            continue;
+          }
+          Set<String> held = importedPlurality(List.of(field.getType()), CONTAINERS).keySet();
+          if (!held.isEmpty() && held.stream().noneMatch(name -> imported.get(name).isEnum())) {
+            holds = true;
+          } else if (!field.getRawType().isPrimitive()
+              && !COUNTS.contains(field.getRawType().getName())) {
+            other = true;
+          }
+        }
+        result = holds && !other;
+      }
+      transparency.put(type, result);
+      return result;
     }
 
     /**
@@ -1035,24 +1136,41 @@ public final class EntityExposure {
     }
 
     /**
-     * A row's cardinality, over the entity's types that reach it: those whose best link is the most
-     * direct kind among them, then the shallowest of those; a collection when any left is plural.
+     * A row's cardinality, over the entity's types that reach it less the {@link #transparent}
+     * ones (all of them, when nothing else is left), less in turn any left whose own link is
+     * {@link LinkKind#VIA} where another kind remains (all of them, when every one left is via):
+     * the shallowest of those, then those whose best link is the most direct kind among them; a
+     * collection when any left is plural.
      */
-    private static Cardinality cardinality(
+    private Cardinality cardinality(
         List<Map.Entry<String, Reached>> types, Map<String, List<DtoLink>> byType) {
-      int mostDirect = Integer.MAX_VALUE;
-      for (Map.Entry<String, Reached> type : types) {
-        mostDirect = Math.min(mostDirect, kindRank(byType, type.getKey()));
+      List<Map.Entry<String, Reached>> candidates =
+          types.stream().filter(type -> !transparent(type.getKey())).toList();
+      if (candidates.isEmpty()) {
+        candidates = types;
+      }
+      // A via link is the weakest evidence: the type is reached only through a carrier. Where the
+      // entity has a more direct type in the answer, that type decides.
+      List<Map.Entry<String, Reached>> linked =
+          candidates.stream()
+              .filter(type -> best(byType.get(type.getKey())).kind() != LinkKind.VIA)
+              .toList();
+      if (!linked.isEmpty()) {
+        candidates = linked;
       }
       int shallowest = Integer.MAX_VALUE;
-      for (Map.Entry<String, Reached> type : types) {
-        if (kindRank(byType, type.getKey()) == mostDirect) {
-          shallowest = Math.min(shallowest, type.getValue().depth());
+      for (Map.Entry<String, Reached> type : candidates) {
+        shallowest = Math.min(shallowest, type.getValue().depth());
+      }
+      int mostDirect = Integer.MAX_VALUE;
+      for (Map.Entry<String, Reached> type : candidates) {
+        if (type.getValue().depth() == shallowest) {
+          mostDirect = Math.min(mostDirect, kindRank(byType, type.getKey()));
         }
       }
-      for (Map.Entry<String, Reached> type : types) {
-        if (kindRank(byType, type.getKey()) == mostDirect
-            && type.getValue().depth() == shallowest
+      for (Map.Entry<String, Reached> type : candidates) {
+        if (type.getValue().depth() == shallowest
+            && kindRank(byType, type.getKey()) == mostDirect
             && type.getValue().plural()) {
           return Cardinality.COLLECTION;
         }

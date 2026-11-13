@@ -144,8 +144,8 @@ class EntityExposureTest {
   void aDtoHeldAsAListFieldIsExposedByTheOperationReturningItsHolder() {
     assertDto("Hotel", "HotelRow", LinkKind.FACTORY, "HotelRow.from(Hotel)");
     // HotelPage (the holder, reached via HotelRow) and HotelRow itself both return the same way:
-    // one collapsed row, keeping HotelPage — it sorts first. HotelRow's factory link beats
-    // HotelPage's via link, and HotelRow is held as a List: the page is a collection.
+    // one collapsed row, keeping HotelPage — it sorts first. HotelPage is a transparent wrapper,
+    // looked through to the HotelRow list it holds at its own depth: the page is a collection.
     assertEquals(
         List.of(
             new OperationLink(
@@ -203,7 +203,7 @@ class EntityExposureTest {
 
   @Test
   void anAssemblerLinkedPageOfMapperLinkedItemsIsACollection() {
-    // AtlasItem's mapper link beats AtlasPage's assembler link; AtlasItem rides in a List.
+    // AtlasPage(List<AtlasItem>, int) is transparent: looked through to its items, a List.
     assertDto("Atlas", "AtlasItem", LinkKind.MAPPER, "AtlasMapper.toItem(Atlas)");
     assertDto("Atlas", "AtlasPage", LinkKind.ASSEMBLER, "AtlasAssembler.page()");
     assertEquals(Cardinality.COLLECTION, cardinality("Atlas", "AtlasResource.page"));
@@ -235,6 +235,59 @@ class EntityExposureTest {
     assertOperation(
         "Zulu", "ZuluResource.all", "GET", "/zulus", "ZuluDto", OperationKind.SCHEMA,
         Cardinality.COLLECTION);
+  }
+
+  @Test
+  void aWrapperLinkedTheSameWayAsItsItemsIsLookedThroughToThem() {
+    // Both assembler-linked: the old rule kept the shallower list, single.
+    assertDto("Kestrel", "KestrelList", LinkKind.ASSEMBLER, "KestrelAssembler.list()");
+    assertDto("Kestrel", "KestrelItem", LinkKind.ASSEMBLER, "KestrelAssembler.list()");
+    assertEquals(Cardinality.COLLECTION, cardinality("Kestrel", "KestrelResource.list"));
+    assertEquals(Cardinality.SINGLE, cardinality("Kestrel", "KestrelResource.one"));
+  }
+
+  @Test
+  void aDetailBeatsTheDeeperMoreDirectlyLinkedRefsItHolds() {
+    assertDto("Lark", "LarkDetail", LinkKind.ASSEMBLER, "LarkAssembler.detail(UUID)");
+    assertDto("Lark", "LarkRef", LinkKind.FACTORY, "LarkRef.of(Lark)");
+    assertEquals(Cardinality.SINGLE, cardinality("Lark", "LarkResource.get"));
+  }
+
+  @Test
+  void anEnvelopeHoldingOneDtoIsSingle() {
+    assertEquals(Cardinality.SINGLE, cardinality("Magpie", "MagpieResource.get"));
+  }
+
+  @Test
+  void aPageCarryingAStringCursorIsNotTransparentAndReadsSingle() {
+    // The known limit: the cursor is data of the page's own, so the page at depth 0 decides.
+    assertFalse(EntityExposure.isTransparent(FIXTURES, F + "NightjarPage"));
+    assertEquals(Cardinality.SINGLE, cardinality("Nightjar", "NightjarResource.page"));
+  }
+
+  @Test
+  void aViaLinkIsDroppedBeforeDepthWhenAnotherKindIsLeft() {
+    // OspreyListResponse's own factory reads only List<OspreyDto>, never Osprey: Osprey→OspreyDto
+    // (factory)→OspreyListResponse (via). OspreyListResponse is not transparent (its reserved
+    // field is a List<String>), so without dropping the weaker via link first, the shallower,
+    // non-plural OspreyListResponse at depth 0 would decide and read single.
+    assertFalse(EntityExposure.isTransparent(FIXTURES, F + "OspreyListResponse"));
+    dto("Osprey", "OspreyListResponse", LinkKind.VIA);
+    assertEquals(Cardinality.COLLECTION, cardinality("Osprey", "OspreyResource.list"));
+  }
+
+  @Test
+  void onlyPureWrappersOfImportedNonEntityTypesAreTransparent() {
+    for (String wrapper :
+        List.of("HotelPage", "AtlasPage", "WhiskeyPage", "KestrelList", "MagpieEnvelope")) {
+      assertTrue(EntityExposure.isTransparent(FIXTURES, F + wrapper), wrapper);
+    }
+    // Carries a String, holds nothing imported, holds only an enum, is an entity, not imported.
+    for (String other :
+        List.of("JulietDetail", "LarkDetail", "KiloCount", "VictorView", "Papa", "Nowhere")) {
+      assertFalse(EntityExposure.isTransparent(FIXTURES, F + other), other);
+    }
+    assertFalse(EntityExposure.isTransparent(FIXTURES, "java.util.List"));
   }
 
   // --- what the map keeps --------------------------------------------------------------------------
@@ -468,7 +521,8 @@ class EntityExposureTest {
     }
     for (String fine :
         Set.of("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India",
-            "Kilo", "Lima", "Mike", "Oscar", "Papa", "Quebec", "Uniform")) {
+            "Kilo", "Lima", "Mike", "Oscar", "Papa", "Quebec", "Uniform", "Kestrel", "Lark",
+            "Magpie", "Nightjar", "Osprey")) {
       assertFalse(report.contains("LinkFixtures$" + fine + " "), fine + ":\n" + report);
     }
   }

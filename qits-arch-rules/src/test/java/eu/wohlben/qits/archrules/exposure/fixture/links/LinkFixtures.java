@@ -776,7 +776,7 @@ public final class LinkFixtures {
 
   // --- cardinality: an assembler-linked page of mapper-linked items ---------------------------
 
-  /** AtlasPage's assembler link loses to AtlasItem's mapper link, held as a list: a collection. */
+  /** AtlasPage is a transparent wrapper, looked through to the AtlasItem list: a collection. */
   @Entity
   public static class Atlas {
     public String name;
@@ -808,6 +808,186 @@ public final class LinkFixtures {
     @GET
     public AtlasPage page() {
       return null;
+    }
+  }
+
+  // --- cardinality: a page wrapper and its items, linked the same way -------------------------
+
+  /**
+   * KestrelList and its KestrelItem items are both assembler-linked: the transparent list is
+   * looked through to its items, at its own depth — a collection; the item alone is single.
+   */
+  @Entity
+  public static class Kestrel {
+    public String name;
+
+    public static List<Kestrel> listAll() {
+      return List.of();
+    }
+  }
+
+  public record KestrelItem(String name) {}
+
+  public record KestrelList(List<KestrelItem> items) {}
+
+  public static class KestrelAssembler {
+    public KestrelList list() {
+      return new KestrelList(
+          Kestrel.listAll().stream().map(kestrel -> new KestrelItem(kestrel.name)).toList());
+    }
+  }
+
+  @Path("/kestrels")
+  public static class KestrelResource {
+    @GET
+    public KestrelList list() {
+      return null;
+    }
+
+    @GET
+    @Path("one")
+    public KestrelItem one() {
+      return null;
+    }
+  }
+
+  // --- cardinality: a detail beats the deeper, more directly linked refs it holds ------------
+
+  /** LarkDetail (assembler, depth 0) beats its LarkRef list (factory, depth 1): single. */
+  @Entity
+  public static class Lark {
+    public String name;
+
+    public static Lark findById(UUID id) {
+      return null;
+    }
+  }
+
+  public record LarkRef(String name) {
+    public static LarkRef of(Lark lark) {
+      return new LarkRef(lark.name);
+    }
+  }
+
+  public record LarkDetail(String name, List<LarkRef> refs) {}
+
+  public static class LarkAssembler {
+    public LarkDetail detail(UUID id) {
+      Lark lark = Lark.findById(id);
+      return new LarkDetail(lark.name, List.of(LarkRef.of(lark)));
+    }
+  }
+
+  @Path("/larks")
+  public static class LarkResource {
+    @GET
+    public LarkDetail get() {
+      return null;
+    }
+  }
+
+  // --- cardinality: an envelope holding one DTO -------------------------------------------------
+
+  /** MagpieEnvelope is transparent and holds one MagpieDto: single. */
+  @Entity
+  public static class Magpie {
+    public String name;
+
+    public static Magpie findById(UUID id) {
+      return null;
+    }
+  }
+
+  public record MagpieDto(String name) {
+    public static MagpieDto from(Magpie magpie) {
+      return new MagpieDto(magpie.name);
+    }
+  }
+
+  public record MagpieEnvelope(MagpieDto magpie) {}
+
+  public static class MagpieAssembler {
+    public MagpieEnvelope get(UUID id) {
+      return new MagpieEnvelope(MagpieDto.from(Magpie.findById(id)));
+    }
+  }
+
+  @Path("/magpies")
+  public static class MagpieResource {
+    @GET
+    public MagpieEnvelope get() {
+      return null;
+    }
+  }
+
+  // --- cardinality, a known limit: a page carrying a String cursor is not transparent ---------
+
+  /**
+   * NightjarPage carries a String cursor beside its rows, so it is not looked through: assembler
+   * linked at depth 0, it beats its NightjarRow list at depth 1 and reads as single.
+   */
+  @Entity
+  public static class Nightjar {
+    public String name;
+
+    public static List<Nightjar> listAll() {
+      return List.of();
+    }
+  }
+
+  public record NightjarRow(String name) {
+    public static NightjarRow from(Nightjar nightjar) {
+      return new NightjarRow(nightjar.name);
+    }
+  }
+
+  public record NightjarPage(List<NightjarRow> rows, String cursor) {}
+
+  public static class NightjarAssembler {
+    public NightjarPage page() {
+      return new NightjarPage(Nightjar.listAll().stream().map(NightjarRow::from).toList(), null);
+    }
+  }
+
+  @Path("/nightjars")
+  public static class NightjarResource {
+    @GET
+    public NightjarPage page() {
+      return null;
+    }
+  }
+
+  // --- cardinality: a via link is dropped before depth, where another kind is left -----------
+
+  /**
+   * OspreyListResponse's own factory never reads Osprey, only {@code List<OspreyDto>}: the link
+   * chain is Osprey→OspreyDto (factory)→OspreyListResponse (via). OspreyListResponse is not
+   * transparent — its reserved field is a {@code List<String>} — so at depth 0 it would otherwise
+   * outrank the plural OspreyDto it holds at depth 1 and read single; dropping the weaker via
+   * link first leaves OspreyDto deciding, a collection.
+   */
+  @Entity
+  public static class Osprey {
+    public String name;
+  }
+
+  public record OspreyDto(String name) {
+    public static OspreyDto from(Osprey osprey) {
+      return new OspreyDto(osprey.name);
+    }
+  }
+
+  public record OspreyListResponse(List<OspreyDto> items, List<String> reserved) {
+    public static OspreyListResponse of(List<OspreyDto> items) {
+      return new OspreyListResponse(items, List.of());
+    }
+  }
+
+  @Path("/ospreys")
+  public static class OspreyResource {
+    @GET
+    public OspreyListResponse list() {
+      return OspreyListResponse.of(List.of());
     }
   }
 }

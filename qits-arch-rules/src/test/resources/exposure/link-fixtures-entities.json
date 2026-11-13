@@ -321,6 +321,46 @@
       ]
     },
     {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Kestrel",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KestrelItem",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "KestrelAssembler.list()"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KestrelList",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "KestrelAssembler.list()"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "KestrelResource.list",
+          "method" : "GET",
+          "path" : "/kestrels",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KestrelItem",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        },
+        {
+          "operationId" : "KestrelResource.one",
+          "method" : "GET",
+          "path" : "/kestrels/one",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$KestrelItem",
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
       "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Kilo",
       "table" : null,
       "marking" : "domain",
@@ -347,6 +387,38 @@
       ]
     },
     {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Lark",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$LarkDetail",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "LarkAssembler.detail(UUID)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$LarkRef",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "LarkRef.of(Lark)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "LarkResource.get",
+          "method" : "GET",
+          "path" : "/larks",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$LarkDetail",
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
       "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Lima",
       "table" : null,
       "marking" : "technical",
@@ -357,6 +429,38 @@
       "operations" : [ ]
     },
     {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Magpie",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$MagpieDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "MagpieDto.from(Magpie)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$MagpieEnvelope",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "MagpieAssembler.get(UUID)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "MagpieResource.get",
+          "method" : "GET",
+          "path" : "/magpies",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$MagpieDto",
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
+    },
+    {
       "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Mike",
       "table" : null,
       "marking" : "projection",
@@ -365,6 +469,38 @@
       "knownGap" : null,
       "dtos" : [ ],
       "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Nightjar",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$NightjarPage",
+          "kind" : "assembler",
+          "via" : null,
+          "site" : "NightjarAssembler.page()"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$NightjarRow",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "NightjarRow.from(Nightjar)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "NightjarResource.page",
+          "method" : "GET",
+          "path" : "/nightjars",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$NightjarPage",
+          "kind" : "returns",
+          "cardinality" : "single"
+        }
+      ]
     },
     {
       "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$November",
@@ -385,6 +521,38 @@
       "knownGap" : "qits-1945",
       "dtos" : [ ],
       "operations" : [ ]
+    },
+    {
+      "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Osprey",
+      "table" : null,
+      "marking" : "domain",
+      "reason" : null,
+      "projectionOf" : null,
+      "knownGap" : null,
+      "dtos" : [
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$OspreyDto",
+          "kind" : "factory",
+          "via" : null,
+          "site" : "OspreyDto.from(Osprey)"
+        },
+        {
+          "type" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$OspreyListResponse",
+          "kind" : "via",
+          "via" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$OspreyDto",
+          "site" : "OspreyListResponse.<init>(List, List)"
+        }
+      ],
+      "operations" : [
+        {
+          "operationId" : "OspreyResource.list",
+          "method" : "GET",
+          "path" : "/ospreys",
+          "dto" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$OspreyDto",
+          "kind" : "returns",
+          "cardinality" : "collection"
+        }
+      ]
     },
     {
       "entity" : "eu.wohlben.qits.archrules.exposure.fixture.links.LinkFixtures$Papa",

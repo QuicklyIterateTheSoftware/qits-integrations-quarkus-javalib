@@ -571,8 +571,12 @@ where several of the entity's DTOs reach the same operation, `dto` is the best o
 `direct > returns > schema > body`, ties broken by `dto` FQN lexicographically, and `kind` is that
 row's kind. `cardinality` says whether the answer carries several of the entity's data
 (`collection`: a `List`, array, `Multi`, map values, a page of its rows, a `@Schema(type = ARRAY)`)
-or one (`single`), decided over every type of the entity's reaching the row: the most direct link
-kind first, then the shallowest field depth (format version 2). `-Dgolden.update=true` (or
+or one (`single`), decided over every type of the entity's reaching the row less the transparent
+ones — pure wrappers whose fields hold imported types beside at most primitives, boxed numbers and
+booleans (`Page(List<Row> rows, int total)`), looked through at no depth cost — then less, in turn,
+any `via`-linked type where another kind is left (`via` is the weakest evidence: a type reached
+only through a carrier) — the shallowest field depth first, then the most direct link kind (format
+version 2); a wrapper carrying a `String` such as a cursor is not transparent. `-Dgolden.update=true` (or
 `QITS_GOLDEN_UPDATE=true`) writes it instead. Every judged type is matched **by name**; the fixture mirror of the three markers and the
 real JAX-RS, JPA and MicroProfile OpenAPI annotations in this module's test sources are where a
 rename surfaces, and `EntityExposureUsageTest` runs the snippet above against a checked-in map.
