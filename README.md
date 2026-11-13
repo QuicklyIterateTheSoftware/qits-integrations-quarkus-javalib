@@ -1,7 +1,7 @@
 # qits-integrations-quarkus-javalib
 
 Quarkus glue every qits service needs and no service owns. The reactor is
-`eu.wohlben.qits:qits-integrations-quarkus`, with eight modules today:
+`eu.wohlben.qits:qits-integrations-quarkus`, with nine modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Quarkus glue every qits service needs and no service owns. The reactor is
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. Plus the entity-exposure markers `@Technical`, `@Projection` and `@Exposes` that qits-arch-rules' `EntityExposureRules` reads. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 | `qits-http-core/` | `eu.wohlben.qits:qits-http-core` | Service-to-service HTTP that says who is calling: `QitsHttpClients.wrap` turns a raw `java.net.http.HttpClient` into one that opens a CLIENT span and sends `traceparent` plus `X-Qits-Caller`; REST clients get the caller header from a filter; receivers record it on the server span as `qits.caller`. |
+| `qits-offline-core/` | `eu.wohlben.qits:qits-offline-core` | The server half of offline-first PWAs, opt-in per operation with `@OfflineCapable`: `Idempotency-Key` writes that run once and replay, record versions on the wire (`ETag`, `If-Match`, 412/428), changed-since reads by transaction id with tombstones, and every refusal as `application/problem+json`. |
 | `qits-telemetry-core/` | `eu.wohlben.qits:qits-telemetry-core` | Telemetry export that carries a bearer: CDI `SpanExporter`/`LogRecordExporter`/`MetricExporter` beans on the upstream OTLP/HTTP builders, whose header supplier attaches the `qits` oidc client's current token on every export. |
 | `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
 | `qits-pact-consumer/` | `eu.wohlben.qits:qits-pact-consumer` | The consumer half of the contracts: reads providers' golden masters off the test classpath and turns a (provider state, operation) into a pact row that binds only what the consumer reads. Test scope for consumers. |
@@ -990,6 +991,238 @@ interface would take an extension, which this module is not. A REST call that mu
 connection wraps itself in `RetryPolicy.execute(…)`, or moves to a wrapped `HttpClient`. The filter
 also stands aside when response filters run on an I/O thread, where waiting would block the event
 loop; under Quarkus they run on a worker.
+
+---
+
+# qits-offline-core
+
+## What it is
+
+The server half of offline-first PWAs (qits-2148). A client that queues writes while offline and
+replays them later needs three promises from the server, and until now no service made any of them:
+a replayed write is applied once, a write against a record that changed meanwhile is refused rather
+than applied (the server is authoritative; never last-write-wins), and a collection can be read as
+"what changed since my cursor", deletions included. Every refusal answers one shape,
+`application/problem+json`, so the client can tell "conflict, and here is the server's record"
+apart from everything else.
+
+All of it is **opt-in per operation**: `@OfflineCapable` on a JAX-RS resource class (all its
+operations) or on single operations. A resource without it behaves as before the jar arrived.
+
+| Piece | What it does |
+| --- | --- |
+| `@OfflineCapable` | `@InterceptorBinding`, `RUNTIME`, `TYPE` and `METHOD`. Switches on everything below. |
+| `IdempotencyInterceptor` | `POST`/`PUT`/`PATCH`/`DELETE` with `Idempotency-Key`: runs once per (caller, key), replays the first 2xx answer with `Idempotency-Replayed: true`. |
+| `OfflineRecord` | `Object id()`, `long version()`: the DTOs offline operations answer. |
+| `ETagFilter` | An offline `GET` answering 200 with an `OfflineRecord` gets `ETag: "<version>"`. |
+| `RecordVersions.require(ifMatch, currentVersion, current)` | The resource's check inside its write transaction: 428 without a version, 412 with `current` on a stale one. |
+| `Changes`, `ChangesPage`, `Tombstone`, `Tombstones`, `ChangeCursor` | Changed-since reads by transaction id, deletions as tombstones. |
+| `Problems`, the exceptions and their mappers | The problem types below, answered as `application/problem+json`. |
+| `OfflineSchemaCheck` | Fails boot, naming what is missing, when an `@OfflineCapable` bean exists and the schema does not. |
+
+## Problems
+
+`{type, title, status, detail}`, plus `current` (the record) and `currentVersion` where relevant.
+The `type` URNs are constants in `Problems`; a client switches on them, so never reword one.
+
+| type | status | when |
+| --- | --- | --- |
+| `urn:qits:problem:stale-version` | 412 | `If-Match` names an older version. `current` is the record now, and `ETag` its version. |
+| `urn:qits:problem:version-required` | 428 | update/delete without `If-Match`, with `*`, a weak or a malformed one |
+| `urn:qits:problem:idempotency-key-reused` | 422 | same key, same caller, different request |
+| `urn:qits:problem:idempotency-key-invalid` | 400 | the key is not 1-255 printable ASCII characters |
+| `urn:qits:problem:cursor-expired` | 410 | `since` is older than tombstone retention; the client re-syncs from scratch |
+| `urn:qits:problem:cursor-invalid` | 400 | `since` does not decode |
+
+A resource throws `StaleVersionException(current, currentVersion)`, `VersionRequiredException`,
+`CursorExpiredException` or `CursorInvalidException` (all `OfflineProblemException`s), and
+`OfflineProblemMapper` writes them. JPA's `jakarta.persistence.OptimisticLockException` — a race
+between the check and the commit — is mapped to `stale-version` without `current`; the client
+re-reads. The body is serialized with the service's CDI `ObjectMapper` and written as a string, so no
+JSON provider has to accept the `problem+json` media type.
+
+## Adoption
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-offline-core</artifactId>
+</dependency>
+```
+
+The service already holds what it needs: quarkus-rest-jackson, quarkus-agroal with
+quarkus-jdbc-postgresql, quarkus-narayana-jta. Then copy
+`META-INF/qits-offline/schema.sql` (below) into a Flyway migration of its own — its own V-number,
+its entity diagram regenerated — and write the resource:
+
+```java
+@Path("/things")
+@OfflineCapable
+public class ThingResource {
+
+  @Inject Changes changes;
+  @Inject Tombstones tombstones;
+
+  @POST                                       // no If-Match: Idempotency-Key covers a create
+  @Extension(name = "x-qits-offline", value = "true")
+  public Response create(ThingInput in) { … tombstones.clear("things", id); … }
+
+  @PUT @Path("{id}") @Transactional
+  @Extension(name = "x-qits-offline", value = "true")
+  public Thing update(@PathParam("id") String id, @HeaderParam("If-Match") String ifMatch, ThingInput in) {
+    Thing current = load(id);
+    RecordVersions.require(ifMatch, current.version(), () -> current);
+    …
+  }
+
+  @DELETE @Path("{id}") @Transactional
+  @Extension(name = "x-qits-offline", value = "true")
+  public void delete(@PathParam("id") String id, @HeaderParam("If-Match") String ifMatch) {
+    Thing current = load(id);
+    RecordVersions.require(ifMatch, current.version(), () -> current);
+    …
+    tombstones.record("things", id, current.version());
+  }
+
+  @GET @Path("{id}")                          // ETagFilter adds ETag: "<version>"
+  @Extension(name = "x-qits-offline", value = "true")
+  public Thing get(@PathParam("id") String id) { … }
+
+  @GET
+  @Extension(name = "x-qits-offline", value = "true")
+  public ChangesPage<Thing> list(@QueryParam("since") String since) {
+    return changes.page("things", "things", "id", since,
+        row -> new Thing(row.getString("id"), row.getString("name"), row.getLong("version")));
+  }
+}
+```
+
+**OpenAPI.** Every offline operation also carries `@Extension(name = "x-qits-offline", value =
+"true")` (MicroProfile OpenAPI) itself: MP OpenAPI does not read meta-annotations, so
+`@OfflineCapable` cannot add it. The exported `docs/openapi.yml` then shows which operations are
+offline, which is what the PWA lint rules read.
+
+## Idempotency
+
+The interceptor (`@Priority(PLATFORM_BEFORE + 100)`, so ahead of `@Transactional`) joins the
+caller's JTA transaction or starts one, and claims the key with `INSERT … ON CONFLICT DO NOTHING
+RETURNING` into `qits_idempotency`, keyed `(caller, idem_key)` — `caller` is the `SecurityIdentity`
+principal name, or `anonymous`. Postgres makes a concurrent duplicate wait on that insert until the
+first transaction ends, so the method runs at most once per key.
+
+- **Claimed**: the method runs; a 2xx answer stores status, the JSON body, `ETag` and `Location` in
+  the same row, and commits with the write.
+- **Already claimed**: same fingerprint, the stored answer is replayed with `Idempotency-Replayed:
+  true` and the method does not run; another fingerprint, 422 `idempotency-key-reused`.
+- **The method throws, or answers a non-2xx `Response`**: the transaction rolls back and the key is
+  free again. A 412 is therefore never replayed, and the client retries the same key with the new
+  version.
+
+The fingerprint is SHA-256 over the method, the raw path and query, and the JSON of the entity
+parameter (the one with no JAX-RS annotation). A method declared to return `Response` replays as a
+`Response`; one declared to return a DTO replays by throwing `IdempotentReplay`, which
+`IdempotentReplayMapper` writes unchanged — a CDI interceptor cannot return a `Response` where a DTO
+is declared. A method returning nothing stores 204, a DTO 200. A plain `String` entity is stored as
+its JSON, so a replay of it comes back quoted; answer DTOs.
+
+Retention: `qits.offline.idempotency.retention` (ISO-8601 duration, default `P7D`). Each claim first
+deletes at most 100 expired rows (`FOR UPDATE SKIP LOCKED`), so no scheduler is needed.
+
+## Changed-since reads
+
+**The change marker is the writing transaction's id, not a timestamp.** Every offline table has
+`change_xid xid8 NOT NULL DEFAULT pg_current_xact_id()`, which the trigger `qits_touch_change_xid()`
+sets on each `UPDATE` (in JPA: unmapped, or `insertable = false, updatable = false`). A transaction
+that commits late still has an xid at or above the next reader's snapshot `xmin`; a timestamp makes
+no such promise and skips the row.
+
+`changes.page(resource, from, idColumn, since, rows)` reads one page in a `REPEATABLE READ`
+transaction of its own: `select t.* from <from> t`, where `from` is a table or a parenthesized
+subquery (`page(resource, from, idColumn, since, limit, rows, params…)` binds its `?`s, for a
+caller-scoped read), plus the `resource`'s tombstones. `from` and `idColumn` are the service's SQL,
+never a request's.
+
+- No `since`: every row — the initial sync. Its first page carries no tombstones.
+- `since`: rows and tombstones with `change_xid >= x` (after `a` when mid-paging), ordered
+  `(change_xid, id)`, ids compared as text in the `"C"` collation.
+- Up to `limit`, capped at `qits.offline.changes.max-page-size` (default 500). A full page answers
+  `hasMore: true` and a cursor that keeps `x` and moves `a`; the last page's cursor carries the
+  lowest snapshot `xmin` the run of pages saw.
+- A row may come back twice across reads, which the client's upsert by id and version absorbs.
+- A cursor older than `qits.offline.tombstones.retention` (default `P30D`): 410; garbage: 400.
+
+The answer is `ChangesPage<T extends OfflineRecord>(items, deleted, nextCursor, hasMore)`, with
+`Tombstone(id, version)` in `deleted`. The cursor (`ChangeCursor`) is opaque to the client:
+base64url JSON `{"x": <xmin>, "a": [<xid>, "<id>"] | null, "m": <xmin>?, "t": <epoch seconds>}`.
+`m` exists only mid-paging: without it, a write committing between two pages with an xid below `a`
+would be skipped by both pages and by the next sync.
+
+`Tombstones.record(resource, id, version)` upserts in the delete's own transaction, and
+`Tombstones.clear(resource, id)` forgets it when the id is created again. Each `record` first purges
+at most 100 tombstones past retention.
+
+## The schema
+
+Shipped as `META-INF/qits-offline/schema.sql`; the service copies it into its own migration.
+`OfflineSchemaCheck` observes `StartupEvent` and, once any bean carries `@OfflineCapable`, fails
+boot naming each missing table or function.
+
+```sql
+create table qits_idempotency (
+    caller      text        not null,
+    idem_key    text        not null,
+    fingerprint text        not null,
+    status      integer,
+    body        text,
+    etag        text,
+    location    text,
+    created_at  timestamptz not null default now(),
+    primary key (caller, idem_key)
+);
+create index qits_idempotency_created_at on qits_idempotency (created_at);
+
+create table qits_tombstones (
+    resource   text        not null,
+    record_id  text        not null,
+    version    bigint      not null,
+    change_xid xid8        not null default pg_current_xact_id(),
+    deleted_at timestamptz not null default now(),
+    primary key (resource, record_id)
+);
+create index qits_tombstones_changes on qits_tombstones (resource, change_xid, record_id collate "C");
+create index qits_tombstones_deleted_at on qits_tombstones (deleted_at);
+
+create or replace function qits_touch_change_xid() returns trigger
+language plpgsql as $$
+begin
+    new.change_xid := pg_current_xact_id();
+    return new;
+end
+$$;
+
+-- and for each offline table:
+-- alter table things add column change_xid xid8 not null default pg_current_xact_id();
+-- create index things_changes on things (change_xid, (id::text collate "C"));
+-- create trigger things_change_xid before update on things
+--     for each row execute function qits_touch_change_xid();
+```
+
+## What it depends on
+
+API jars at compile scope (JAX-RS, annotation, MP-config); provided: CDI, interceptor,
+quarkus-narayana-jta (`QuarkusTransaction`, `StartupEvent`), quarkus-security (`SecurityIdentity`,
+looked up through `Instance`), jackson-databind, pgjdbc and the JPA API. Storage is plain JDBC on the
+default `DataSource`, so the module needs no Hibernate. The interceptor, mappers, filter and beans
+reach a consumer through the jandex index.
+
+## Tests
+
+`@QuarkusTest`s against zonky's embedded postgres, through a fixture resource over one table
+(`fixture_things`), with the module's own `schema.sql` applied: `IdempotencyTest` (replay, a
+concurrent duplicate, reuse, failures freeing the key), `RecordVersionsTest` (`ETag`, 412, 428),
+`ChangesTest` (initial read, since, paging, tombstones, 410, 400), and the plain
+`OfflineSchemaCheckTest`, `ChangeCursorTest`, `RecordVersionsParseTest`. Like qits-db-core's, the
+postgres-backed tests skip under root, where `initdb` refuses to run.
 
 ---
 

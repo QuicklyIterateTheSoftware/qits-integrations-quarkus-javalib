@@ -35,6 +35,7 @@
         <module>qits-db-core</module>
         <module>qits-environment-core</module>
         <module>qits-http-core</module>
+        <module>qits-offline-core</module>
         <module>qits-telemetry-core</module>
         <module>qits-service-mock</module>
         <module>qits-pact-consumer</module>

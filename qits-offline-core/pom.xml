@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The server half of offline-first (qits-2148): what an operation marked @OfflineCapable owes
+         a client that queues its writes and replays them later. A replayed write is applied once
+         (Idempotency-Key), a write against a changed record is refused rather than applied
+         (If-Match, 412), a collection is read as the changes since a cursor with deletions as
+         tombstones, and every refusal answers one shape, application/problem+json.
+
+         THE PACKAGING BARGAIN is qits-http-core's: API jars and never an extension. Storage is
+         plain JDBC on the consumer's default DataSource, so the module carries no Hibernate; the
+         one JPA type it names (OptimisticLockException) is PROVIDED, as are CDI, JTA, Jackson,
+         pgjdbc and SecurityIdentity — every consumer that opts in already holds all of them, and
+         a compile-scope copy would make this module's versions fleet-wide pins.
+
+         Opt-in per operation: nothing here acts on a resource that does not carry the annotation,
+         so a service may hold the jar before it adopts a single operation. -->
+    <parent>
+        <groupId>eu.wohlben.qits</groupId>
+        <artifactId>qits-integrations-quarkus</artifactId>
+        <version>2026.1113.5438</version>
+    </parent>
+
+    <artifactId>qits-offline-core</artifactId>
+    <packaging>jar</packaging>
+    <name>qits-offline-core</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>jakarta.ws.rs</groupId>
+            <artifactId>jakarta.ws.rs-api</artifactId>
+        </dependency>
+        <dependency>
+            <!-- @Priority. The ws.rs API references it without carrying it. -->
+            <groupId>jakarta.annotation</groupId>
+            <artifactId>jakarta.annotation-api</artifactId>
+        </dependency>
+        <dependency>
+            <!-- ConfigProvider, for the three retention and page-size keys. The implementation is
+                 the consuming app's smallrye-config. -->
+            <groupId>org.eclipse.microprofile.config</groupId>
+            <artifactId>microprofile-config-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <!-- Instance, BeanManager, @Initialized. PROVIDED: every Quarkus app carries it through
+                 ArC. -->
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- @InterceptorBinding, @AroundInvoke. PROVIDED, as CDI. -->
+            <groupId>jakarta.interceptor</groupId>
+            <artifactId>jakarta.interceptor-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- PROVIDED, as in qits-db-core: the interceptor puts the key and the write in one
+                 transaction through QuarkusTransaction, which lives here, and Changes reads its
+                 page in one. It brings jakarta.transaction-api with it, and quarkus-core for the
+                 StartupEvent OfflineSchemaCheck observes. Not transitive, so no consumer inherits
+                 a JTA it did not ask for. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-narayana-jta</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- SecurityIdentity, for the caller an idempotency key is scoped to. PROVIDED, and
+                 looked up through Instance: a consumer without it keys everything to `anonymous`. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- The CDI ObjectMapper writes the stored replay body and the problem bodies, and
+                 ChangeCursor's JSON. PROVIDED: every consumer with quarkus-rest-jackson holds it. -->
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- PROVIDED, for qits-db-core's reason: every consumer ships it inside
+                 quarkus-jdbc-postgresql. The SQL here is postgres' own (xid8, ON CONFLICT). -->
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- OptimisticLockMapper names jakarta.persistence.OptimisticLockException, the race
+                 between a version check and its commit. PROVIDED: only a JPA consumer can throw
+                 it, and that consumer has the API already. -->
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- The fixture resource is a real Quarkus REST endpoint with the real Jackson
+                 providers, so a test answer is what a consumer's client will read. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-agroal</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jdbc-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Real postgres, as in qits-db-core: the claims here are about postgres' own
+                 locking and snapshots (a concurrent duplicate waiting on an insert, xid8 against a
+                 snapshot's xmin), and a mock would only agree with whoever wrote it. -->
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <version>${zonky.embedded-postgres.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-amd64</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-amd64-alpine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-darwin-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <!-- The consuming app discovers the interceptor, the mappers, the filter and the
+                     beans from this index. Without it the jar is inert on a consumer's classpath:
+                     @OfflineCapable binds nothing and says nothing about why. -->
+                <groupId>io.smallrye</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
